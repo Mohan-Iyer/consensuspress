@@ -1,21 +1,32 @@
-# Python
-__pycache__/
-*.py[cod]
-venv/
-.env
+# =============================================================================
+# ConsensusPress — .gitignore
+# =============================================================================
 
-# Generator output
-generator/output/*
-!generator/output/.gitkeep
+# PHP dependencies — buyers run composer install
+plugin/consensuspress/vendor/
+
+# PHPUnit cache
+tests/.phpunit.result.cache
+
+# Throwaway scripts
+tests/tmp/
 
 # macOS
 .DS_Store
+**/.DS_Store
 
 # IDE
 .idea/
 .vscode/
-*.code-workspace
+*.swp
+*.swo
 
 # Logs
-logs/
 *.log
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+*.zipfiles/
