@@ -1,0 +1,849 @@
+# =============================================================================
+# SPRINT 3: ASYNC + META BOX — D1-D7 SPECIFICATION
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Sprint:   3 of 6
+# Author:   D-C (Session 05)
+# Date:     2026-03-01
+# Method:   AFD v1.3.0
+# HLR ref:  Build Sequence Steps 4-5 (async upgrade) + Step 8 (meta box)
+# Mock ref: consensuspress_mock_api.yaml (fixtures 1, 4, 8)
+# =============================================================================
+# SCOPE:
+#   Part A — Async upgrade: Create form submits topic → receives job_id
+#   immediately → WP-Cron processes API call in background → JS polls
+#   for completion every 5 seconds → redirect to draft on success.
+#   Eliminates PHP timeout risk on shared hosts (30s limit).
+#
+#   Part B — Consensus Meta Box: Read-only sidebar panel on post edit
+#   screen. Reads the 6 _consensuspress_* keys written by Post Builder
+#   in Sprint 2. Displays score, champion, agreement, risk, mode, date.
+#
+# OUT OF SCOPE (future sprints):
+#   - Rescue mode (Sprint 4)
+#   - Diff viewer (Sprint 4)
+#   - Usage tracking/tier enforcement (Sprint 5)
+#   - WordPress.org packaging (Sprint 6)
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# D0: PRESERVATION CONTRACTS — DO NOT BREAK
+# =============================================================================
+d0_preservation:
+  rule: "All Sprint 1 + Sprint 2 callables preserved. Only consensuspress_ajax_create_post() body changes."
+
+  files_modified_by_sprint_3:
+    - file: "consensuspress.php"
+      modification: "ADD require_once for 2 new classes + MODIFY ajax_create_post body + ADD ajax_poll_job + ADD cron hook"
+      preserved_signatures:
+        - { name: "consensuspress_activate",             note: "Unchanged" }
+        - { name: "consensuspress_deactivate",            note: "Unchanged" }
+        - { name: "consensuspress_init",                  note: "Body adds 2 require_once + 2 instantiations" }
+        - { name: "consensuspress_ajax_test_connection",  note: "Unchanged" }
+        - { name: "consensuspress_ajax_create_post",      note: "BODY changes — now schedules async job. Signature unchanged: (): void" }
+
+    - file: "admin/js/consensuspress-create.js"
+      modification: "ADD polling loop. Existing submit handler modified to expect job_id instead of direct result."
+
+    - file: "admin/css/consensuspress-admin.css"
+      modification: "APPEND meta box styles and polling status styles. No existing rules changed."
+
+  files_not_modified:
+    - "includes/class-consensuspress-api.php"
+    - "includes/class-consensuspress-settings.php"
+    - "includes/class-consensuspress-create.php"
+    - "includes/class-consensuspress-post-builder.php"
+    - "admin/views/settings.php"
+    - "admin/views/create.php"
+    - "admin/js/consensuspress-admin.js"
+    - "uninstall.php"
+    - "readme.txt"
+
+  new_files:
+    - "includes/class-consensuspress-async.php"
+    - "includes/class-consensuspress-meta-box.php"
+    - "admin/views/meta-box.php"
+    - "tests/test-async.php"
+    - "tests/test-meta-box.php"
+
+# =============================================================================
+# D1: FUNCTION SIGNATURES
+# =============================================================================
+d1_signatures:
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-async.php (NEW)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_async:
+    file: "includes/class-consensuspress-async.php"
+    class: "ConsensusPress_Async"
+    purpose: "WP-Cron async job scheduler and processor for consensus API calls"
+
+    constants:
+      JOB_TRANSIENT_PREFIX:
+        type: "string"
+        value: "'_cp_job_'"
+        note: "Prefix for all job transients. Underscore hides from options UI."
+
+      JOB_EXPIRY:
+        type: "int"
+        value: "3600"
+        note: "Transient TTL in seconds (1 hour). Jobs auto-expire."
+
+      CRON_HOOK:
+        type: "string"
+        value: "'consensuspress_process_job'"
+        note: "WP-Cron action hook name. Must match add_action in init()."
+
+      JOB_STATUSES:
+        type: "array<string>"
+        value: "array( 'pending', 'processing', 'complete', 'failed' )"
+        note: "Valid status values for type safety."
+
+    methods:
+
+      init:
+        signature: "public function init(): void"
+        purpose: "Register WP-Cron action hook for job processing"
+        body_logic: |
+          add_action( self::CRON_HOOK, array( $this, 'process_job' ) );
+        phpdoc: |
+          /**
+           * Register WP-Cron hook for background job processing.
+           *
+           * @return void
+           */
+
+      schedule_job:
+        signature: "public function schedule_job( string $topic, string $context ): string"
+        purpose: "Create job transient and schedule WP-Cron event. Returns job ID."
+        body_logic: |
+          1. Generate unique job_id via wp_generate_uuid4()
+          2. Build $job_data array (status=pending, topic, context, created)
+          3. set_transient( self::JOB_TRANSIENT_PREFIX . $job_id, $job_data, self::JOB_EXPIRY )
+          4. wp_schedule_single_event( time(), self::CRON_HOOK, array( $job_id ) )
+          5. $this->spawn_cron() — fire wp-cron.php non-blocking to process immediately
+          6. return $job_id
+        phpdoc: |
+          /**
+           * Schedule an async consensus job for background processing.
+           *
+           * Stores job data in transient, schedules WP-Cron event, and
+           * triggers immediate cron spawn via non-blocking loopback request.
+           *
+           * @param string $topic   Sanitised topic string (min 10 chars).
+           * @param string $context Optional sanitised context string.
+           * @return string Unique job ID (UUID v4).
+           */
+        sanitise: "Inputs already sanitised by AJAX handler before this call."
+
+      process_job:
+        signature: "public function process_job( string $job_id ): void"
+        purpose: "WP-Cron callback. Calls API, creates draft, updates job status."
+        body_logic: |
+          1. $job_data = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id )
+          2. If ! $job_data OR 'pending' !== $job_data['status'], return (idempotent guard)
+          3. Update status to 'processing' → set_transient
+          4. $api_key = get_option( 'consensuspress_api_key', '' )
+          5. If empty $api_key → update status 'failed', error 'API key missing', return
+          6. $api = new ConsensusPress_API( $api_key )
+          7. $result = $api->query( $job_data['topic'], 'create', $job_data['context'] )
+          8. If ! $result['success'] → update status 'failed', store error, return
+          9. $builder = new ConsensusPress_Post_Builder()
+          10. $draft = $builder->create_draft( $result['data'], 'create' )
+          11. If $draft['success'] → update status 'complete', store post_id + edit_url
+          12. Else → update status 'failed', store error message
+          13. set_transient with final state
+        phpdoc: |
+          /**
+           * WP-Cron callback: process a scheduled consensus job.
+           *
+           * Idempotent — safe to call multiple times (checks status before processing).
+           * Calls Seekrates API, creates WordPress draft, updates job transient.
+           *
+           * @param string $job_id UUID job identifier from schedule_job().
+           * @return void
+           */
+
+      get_job_status:
+        signature: "public function get_job_status( string $job_id ): array"
+        purpose: "Return current job status for polling endpoint"
+        body_logic: |
+          1. $job_data = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id )
+          2. If ! $job_data, return array( 'status' => 'not_found' )
+          3. Return array with status, post_id, edit_url, error (nulls where not set)
+        phpdoc: |
+          /**
+           * Get current status of a scheduled job.
+           *
+           * @param string $job_id UUID job identifier.
+           * @return array{
+           *     status:   string,
+           *     post_id:  int,
+           *     edit_url: string,
+           *     error:    array{code: string, message: string}|null
+           * }
+           */
+
+      cleanup_job:
+        signature: "public function cleanup_job( string $job_id ): void"
+        purpose: "Delete job transient after client confirms receipt of result"
+        body_logic: |
+          delete_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
+        phpdoc: |
+          /**
+           * Delete job transient. Called after client confirms result received.
+           *
+           * @param string $job_id UUID job identifier.
+           * @return void
+           */
+
+      spawn_cron:
+        signature: "private function spawn_cron(): void"
+        purpose: "Fire wp-cron.php via non-blocking loopback to process job immediately"
+        body_logic: |
+          $cron_url = site_url( 'wp-cron.php?doing_wp_cron' );
+          wp_remote_post( $cron_url, array(
+              'timeout'   => 0.01,
+              'blocking'  => false,
+              'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
+          ) );
+        phpdoc: |
+          /**
+           * Trigger WP-Cron via non-blocking loopback request.
+           *
+           * Fires wp-cron.php immediately so the job processes without
+           * waiting for the next organic page load. Non-blocking — does
+           * not wait for response. Falls back gracefully if host blocks
+           * loopback requests (job will process on next page load instead).
+           *
+           * @return void
+           */
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-meta-box.php (NEW)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_meta_box:
+    file: "includes/class-consensuspress-meta-box.php"
+    class: "ConsensusPress_Meta_Box"
+    purpose: "Register and render consensus analysis sidebar on post edit screen"
+
+    constants:
+      SCORE_THRESHOLDS:
+        type: "array<string, int>"
+        value: |
+          array(
+              'high'     => 80,
+              'moderate' => 60,
+          )
+        note: "Score >= 80 = HIGH (green), >= 60 = MODERATE (amber), < 60 = LOW (red)."
+
+    methods:
+
+      init:
+        signature: "public function init(): void"
+        purpose: "Register add_meta_boxes hook"
+        body_logic: |
+          add_action( 'add_meta_boxes', array( $this, 'register_meta_box' ) );
+        phpdoc: |
+          /**
+           * Register meta box hooks.
+           *
+           * @return void
+           */
+
+      register_meta_box:
+        signature: "public function register_meta_box(): void"
+        purpose: "Add consensus analysis meta box to post edit screen sidebar"
+        body_logic: |
+          add_meta_box(
+              'consensuspress-analysis',
+              __( 'Consensus Analysis', 'consensuspress' ),
+              array( $this, 'render_meta_box' ),
+              'post',
+              'side',
+              'default'
+          );
+        phpdoc: |
+          /**
+           * Register the Consensus Analysis sidebar meta box.
+           *
+           * Appears on all post edit screens. Shows data only for
+           * posts created via ConsensusPress (has _consensuspress_score meta).
+           *
+           * @return void
+           */
+
+      render_meta_box:
+        signature: "public function render_meta_box( \\WP_Post $post ): void"
+        purpose: "Load meta box template, passing consensus metadata to view"
+        body_logic: |
+          1. $score = get_post_meta( $post->ID, '_consensuspress_score', true )
+          2. If '' === $score (empty string — not a CP post):
+               require_once CONSENSUSPRESS_PLUGIN_DIR . 'admin/views/meta-box-empty.php';
+               return;
+          3. Build $meta array from all 6 CONSENSUS_META_KEYS:
+               score, mode, champion_provider, agreement_level, oracle_risk_level, created_at
+          4. $meta['score_class'] = $this->get_score_class( (float) $score )
+          5. require_once CONSENSUSPRESS_PLUGIN_DIR . 'admin/views/meta-box.php';
+        phpdoc: |
+          /**
+           * Render the Consensus Analysis meta box content.
+           *
+           * Passes $meta array to template. Shows empty state for
+           * posts not created via ConsensusPress.
+           *
+           * @param \WP_Post $post Current post object.
+           * @return void
+           */
+
+      get_score_class:
+        signature: "private function get_score_class( float $score ): string"
+        purpose: "Return CSS class string based on consensus score threshold"
+        body_logic: |
+          if ( $score >= self::SCORE_THRESHOLDS['high'] )     { return 'cp-score-high'; }
+          if ( $score >= self::SCORE_THRESHOLDS['moderate'] ) { return 'cp-score-moderate'; }
+          return 'cp-score-low';
+        phpdoc: |
+          /**
+           * Map consensus score to CSS class for colour-coding.
+           *
+           * @param float $score Consensus score (0.0-100.0).
+           * @return string CSS class: cp-score-high|cp-score-moderate|cp-score-low.
+           */
+
+  # ---------------------------------------------------------------------------
+  # FILE: consensuspress.php (MODIFIED — v1.1.0 → v1.2.0)
+  # ---------------------------------------------------------------------------
+  consensuspress_main_additions:
+    file: "consensuspress.php"
+    modification_type: "MODIFY body of ajax_create_post + ADD new function + ADD hooks"
+
+    modified_function:
+      consensuspress_ajax_create_post:
+        signature: "function consensuspress_ajax_create_post(): void"
+        note: "Signature unchanged. Body now schedules async job instead of direct API call."
+        new_body_logic: |
+          1. check_ajax_referer( 'consensuspress_create_post', 'nonce' )
+          2. current_user_can( 'edit_posts' ) or wp_send_json_error()
+          3. $topic = sanitize_text_field( wp_unslash( $_POST['topic'] ?? '' ) )
+          4. $context = sanitize_textarea_field( wp_unslash( $_POST['context'] ?? '' ) )
+          5. Validate topic length >= 10
+          6. Validate API key not empty
+          7. $async = new ConsensusPress_Async()
+          8. $job_id = $async->schedule_job( $topic, $context )
+          9. wp_send_json_success( array( 'job_id' => $job_id ) )
+        note: "Returns job_id immediately. No longer waits for API. Poll endpoint delivers result."
+
+    new_function:
+      consensuspress_ajax_poll_job:
+        signature: "function consensuspress_ajax_poll_job(): void"
+        purpose: "AJAX polling endpoint. Returns current job status to JS."
+        body_logic: |
+          1. check_ajax_referer( 'consensuspress_poll_job', 'nonce' )
+          2. current_user_can( 'edit_posts' ) or wp_send_json_error()
+          3. $job_id = sanitize_text_field( wp_unslash( $_POST['job_id'] ?? '' ) )
+          4. Validate job_id not empty
+          5. $async = new ConsensusPress_Async()
+          6. $status = $async->get_job_status( $job_id )
+          7. wp_send_json_success( $status )
+        phpdoc: |
+          /**
+           * AJAX polling endpoint for async job status.
+           *
+           * Called by consensuspress-create.js every 5 seconds after
+           * job creation. Returns status: pending|processing|complete|failed.
+           *
+           * @return void Sends JSON via wp_send_json_success.
+           */
+        sanitise:
+          - "$_POST['job_id']: sanitize_text_field( wp_unslash() )"
+        nonce: "consensuspress_poll_job"
+        capability: "edit_posts"
+
+    init_additions:
+      description: "Add to consensuspress_init() body"
+      lines_added: |
+        require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-async.php';
+        require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-meta-box.php';
+
+        $async = new ConsensusPress_Async();
+        $async->init();
+
+        $meta_box = new ConsensusPress_Meta_Box();
+        $meta_box->init();
+
+    hooks_added:
+      - "add_action( 'wp_ajax_consensuspress_poll_job', 'consensuspress_ajax_poll_job', 10 );"
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/views/meta-box.php (NEW)
+  # ---------------------------------------------------------------------------
+  admin_views_meta_box:
+    file: "admin/views/meta-box.php"
+    purpose: "Consensus Analysis sidebar template — read-only display"
+    note: "Receives $meta array and $post from render_meta_box(). No forms. No nonces."
+    elements:
+      - "ABSPATH guard"
+      - "Consensus Score: displayed as percentage with colour class from $meta['score_class']"
+      - "Agreement Level: HIGH / MODERATE / LOW"
+      - "Champion Provider: openai / claude / gemini / mistral / cohere"
+      - "Oracle Risk: low / medium / high / critical"
+      - "Mode: create / rescue"
+      - "Created: formatted date from _consensuspress_created_at"
+    escape_rules:
+      - "All values: esc_html()"
+      - "Score: number_format() then esc_html()"
+      - "Score class: esc_attr()"
+    no_forms: true
+    no_nonces: "Read-only — no data written from this template"
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/js/consensuspress-create.js (MODIFIED — v1.0.0 → v1.1.0)
+  # ---------------------------------------------------------------------------
+  admin_js_create_modifications:
+    file: "admin/js/consensuspress-create.js"
+    modification_type: "REWRITE handleSubmit + ADD polling infrastructure"
+    new_localized_data: "consensuspressCreate gains 'poll_nonce' key (see enqueue changes)"
+    constants:
+      POLL_INTERVAL_MS: 5000
+      MAX_POLL_ATTEMPTS: 24
+      note: "24 attempts × 5s = 120 seconds max wait"
+
+    new_behaviour:
+      on_submit:
+        - "Disable submit button, show spinner + processing message"
+        - "POST to ajax_url: action=consensuspress_create_post, nonce, topic, context"
+        - "On success: receive job_id → start polling loop"
+        - "On error: show error, re-enable button"
+
+      polling_loop:
+        - "Poll every POLL_INTERVAL_MS via setInterval"
+        - "POST to ajax_url: action=consensuspress_poll_job, nonce=poll_nonce, job_id"
+        - "On status=complete: clear interval, show success, redirect to edit_url after 2s"
+        - "On status=failed: clear interval, show error from response, re-enable button"
+        - "On status=pending|processing: continue polling, update status message"
+        - "On max attempts reached: clear interval, show timeout message, re-enable button"
+        - "On AJAX error: clear interval, show error, re-enable button"
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-create.php (MODIFIED — v1.0.0 → v1.1.0)
+  # ---------------------------------------------------------------------------
+  class_create_modifications:
+    file: "includes/class-consensuspress-create.php"
+    modification_type: "ADD poll_nonce to wp_localize_script"
+    detail: |
+      enqueue_create_assets() must add 'poll_nonce' to the consensuspressCreate object:
+        'poll_nonce' => wp_create_nonce( 'consensuspress_poll_job' ),
+      This is the only change. All other methods preserved.
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/css/consensuspress-admin.css (MODIFIED — v1.1.0 → v1.2.0)
+  # ---------------------------------------------------------------------------
+  admin_css_additions:
+    file: "admin/css/consensuspress-admin.css"
+    modification_type: "APPEND — no existing rules deleted or changed"
+    new_rules:
+      - ".cp-meta-box { font-size: 13px; }"
+      - ".cp-meta-box .cp-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f0f0f0; }"
+      - ".cp-meta-box .cp-label { color: #666; }"
+      - ".cp-meta-box .cp-value { font-weight: 600; }"
+      - ".cp-score-high { color: #00a32a; }"
+      - ".cp-score-moderate { color: #dba617; }"
+      - ".cp-score-low { color: #d63638; }"
+      - ".cp-meta-box-empty { color: #999; font-style: italic; }"
+      - ".consensuspress-create-status .polling { color: #2271b1; }"
+
+# =============================================================================
+# D2: TEST SCENARIOS
+# =============================================================================
+d2_test_scenarios:
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-async.php (NEW) — 8 tests
+  # ---------------------------------------------------------------------------
+  test_async:
+    file: "tests/test-async.php"
+    class: "ConsensusPress_Async_Test"
+    extends: "PHPUnit\\Framework\\TestCase"
+
+    scenarios:
+
+      test_schedule_job_returns_uuid:
+        setup: "Fresh ConsensusPress_Async instance"
+        action: "$async->schedule_job( 'Valid topic here now', '' )"
+        assertions:
+          - "Return value is non-empty string"
+          - "String length > 10 (UUID format)"
+
+      test_job_stored_in_transient:
+        setup: "Fresh instance"
+        action: "$job_id = $async->schedule_job( 'Valid topic here now', 'context' )"
+        assertions:
+          - "get_transient( '_cp_job_' . $job_id ) returns array"
+          - "Transient has 'status' = 'pending'"
+          - "Transient has 'topic' = 'Valid topic here now'"
+          - "Transient has 'context' = 'context'"
+          - "Transient has 'created' (non-empty)"
+
+      test_process_job_happy_path:
+        fixture: "fixture_create_success"
+        setup: "Mock transport with 200, API key in options, job transient pre-created with status=pending"
+        action: "$async->process_job( $job_id )"
+        assertions:
+          - "Transient status = 'complete'"
+          - "Transient post_id > 0"
+          - "Transient edit_url non-empty"
+          - "wp_insert_post called"
+
+      test_process_job_api_failure:
+        fixture: "fixture_server_error"
+        setup: "Mock transport 500, job transient status=pending"
+        action: "$async->process_job( $job_id )"
+        assertions:
+          - "Transient status = 'failed'"
+          - "Transient error array non-empty"
+          - "wp_insert_post NOT called"
+
+      test_process_job_idempotent:
+        setup: "Job transient with status='processing' (already running)"
+        action: "$async->process_job( $job_id )"
+        assertions:
+          - "wp_insert_post NOT called (guard fires, exits early)"
+          - "Status remains 'processing'"
+
+      test_get_job_status_pending:
+        setup: "Job transient with status='pending'"
+        action: "$async->get_job_status( $job_id )"
+        assertions:
+          - "Return array has 'status' = 'pending'"
+          - "Return array has 'post_id' = 0"
+
+      test_get_job_status_complete:
+        setup: "Job transient with status='complete', post_id=42, edit_url='/wp-admin/post.php?post=42'"
+        action: "$async->get_job_status( $job_id )"
+        assertions:
+          - "Return array has 'status' = 'complete'"
+          - "Return array has 'post_id' = 42"
+          - "Return array has 'edit_url' non-empty"
+
+      test_get_job_status_not_found:
+        setup: "No transient for this job_id"
+        action: "$async->get_job_status( 'nonexistent-job-id' )"
+        assertions:
+          - "Return array has 'status' = 'not_found'"
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-meta-box.php (NEW) — 6 tests
+  # ---------------------------------------------------------------------------
+  test_meta_box:
+    file: "tests/test-meta-box.php"
+    class: "ConsensusPress_Meta_Box_Test"
+    extends: "PHPUnit\\Framework\\TestCase"
+
+    scenarios:
+
+      test_meta_box_registered_on_init:
+        setup: "ConsensusPress_Meta_Box->init() called"
+        action: "Check add_action called with 'add_meta_boxes'"
+        assertions:
+          - "Source code contains add_action( 'add_meta_boxes'"
+          - "Callback is array( $this, 'register_meta_box' )"
+
+      test_score_class_high:
+        setup: "ConsensusPress_Meta_Box instance"
+        action: "Call get_score_class via reflection with score=87.5"
+        assertions:
+          - "Returns 'cp-score-high'"
+
+      test_score_class_moderate:
+        action: "get_score_class( 65.0 )"
+        assertions:
+          - "Returns 'cp-score-moderate'"
+
+      test_score_class_low:
+        action: "get_score_class( 45.0 )"
+        assertions:
+          - "Returns 'cp-score-low'"
+
+      test_render_empty_for_non_cp_post:
+        setup: |
+          Mock WP_Post with ID=1.
+          get_post_meta stub returns '' for '_consensuspress_score'.
+          Capture require_once calls.
+        action: "$meta_box->render_meta_box( $post )"
+        assertions:
+          - "meta-box-empty.php required (not meta-box.php)"
+
+      test_render_full_for_cp_post:
+        setup: |
+          Mock WP_Post with ID=99.
+          get_post_meta stub returns '87.5' for '_consensuspress_score'.
+          Returns 'openai' for '_consensuspress_champion_provider'.
+          Returns 'HIGH' for '_consensuspress_agreement_level'.
+          Returns 'low' for '_consensuspress_oracle_risk_level'.
+          Returns 'create' for '_consensuspress_mode'.
+          Returns '2026-02-28 09:00:00' for '_consensuspress_created_at'.
+        action: "$meta_box->render_meta_box( $post )"
+        assertions:
+          - "meta-box.php required (not meta-box-empty.php)"
+
+# =============================================================================
+# D3: CONTRACT MAP (OUTPUT/INPUT BALANCE)
+# =============================================================================
+d3_contracts:
+
+  # Create form → AJAX handler (MODIFIED from Sprint 2)
+  contract_1:
+    output:
+      producer: "admin/js/consensuspress-create.js (submit)"
+      data: "{ action: 'consensuspress_create_post', nonce, topic, context }"
+    input:
+      consumer: "consensuspress_ajax_create_post()"
+      reads: "$_POST['topic'], $_POST['context'], nonce"
+    balance: "VERIFIED — same shape as Sprint 2"
+
+  # AJAX handler → Async scheduler (NEW — replaces direct API call)
+  contract_2:
+    output:
+      producer: "consensuspress_ajax_create_post()"
+      data: "{ job_id: string }"
+    input:
+      consumer: "admin/js/consensuspress-create.js (receives job_id, starts polling)"
+      reads: "response.data.job_id"
+    balance: "VERIFIED"
+
+  # JS polling → Poll handler
+  contract_3:
+    output:
+      producer: "admin/js/consensuspress-create.js (polling loop)"
+      data: "{ action: 'consensuspress_poll_job', nonce: poll_nonce, job_id }"
+    input:
+      consumer: "consensuspress_ajax_poll_job()"
+      reads: "$_POST['job_id'], nonce"
+    balance: "VERIFIED"
+
+  # Poll handler → JS (status response)
+  contract_4:
+    output:
+      producer: "consensuspress_ajax_poll_job() via wp_send_json_success()"
+      data: "{ status: string, post_id: int, edit_url: string, error: array|null }"
+    input:
+      consumer: "admin/js/consensuspress-create.js (polling success callback)"
+      reads: "response.data.status, response.data.edit_url, response.data.error"
+    balance: "VERIFIED"
+
+  # Async class → WP-Cron
+  contract_5:
+    output:
+      producer: "ConsensusPress_Async::schedule_job()"
+      data: "wp_schedule_single_event( time(), CRON_HOOK, array( $job_id ) )"
+    input:
+      consumer: "ConsensusPress_Async::process_job( $job_id ) via WP-Cron"
+      reads: "$job_id string"
+    balance: "VERIFIED"
+
+  # Meta box → Post meta (Sprint 2 forward contract — now fulfilled)
+  contract_6:
+    output:
+      producer: "ConsensusPress_Post_Builder::inject_consensus_meta() [Sprint 2]"
+      data: "6 _consensuspress_* post_meta keys"
+    input:
+      consumer: "ConsensusPress_Meta_Box::render_meta_box() [Sprint 3 — this sprint]"
+      reads: "_consensuspress_score, _mode, _champion_provider, _agreement_level, _oracle_risk_level, _created_at"
+    balance: "VERIFIED — Sprint 2 forward contract now fulfilled"
+
+  # poll_nonce → poll endpoint
+  contract_7:
+    output:
+      producer: "ConsensusPress_Create::enqueue_create_assets() — wp_localize_script"
+      data: "consensuspressCreate.poll_nonce = wp_create_nonce( 'consensuspress_poll_job' )"
+    input:
+      consumer: "admin/js/consensuspress-create.js (sent with each poll request)"
+      reads: "consensuspressCreate.poll_nonce"
+    balance: "VERIFIED"
+
+# =============================================================================
+# D4: FILE MANIFEST WITH DNA HEADERS
+# =============================================================================
+d4_manifest:
+
+  new_files:
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-async.php"
+      dna:
+        file: "includes/class-consensuspress-async.php"
+        version: "1.0.0"
+        purpose: "WP-Cron async job scheduler and processor for consensus API calls"
+        author: "C-C (Session 05, Sprint 3)"
+        spec: "sprint3_d1_d7.yaml D1 class_consensuspress_async"
+        php_version: "7.4+"
+        dependencies: "class-consensuspress-api.php, class-consensuspress-post-builder.php"
+        reusable: "Yes — called by Create (Sprint 3) and Rescue (Sprint 4)"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-meta-box.php"
+      dna:
+        file: "includes/class-consensuspress-meta-box.php"
+        version: "1.0.0"
+        purpose: "Register and render consensus analysis sidebar meta box on post edit screen"
+        author: "C-C (Session 05, Sprint 3)"
+        spec: "sprint3_d1_d7.yaml D1 class_consensuspress_meta_box"
+        php_version: "7.4+"
+        dependencies: "WordPress core (add_meta_box, get_post_meta)"
+        reusable: "No — WordPress admin meta box handler"
+
+    - path: "plugin/consensuspress/admin/views/meta-box.php"
+      dna:
+        file: "admin/views/meta-box.php"
+        version: "1.0.0"
+        purpose: "Consensus Analysis meta box template — read-only display"
+        author: "C-C (Session 05, Sprint 3)"
+        spec: "sprint3_d1_d7.yaml D1 admin_views_meta_box"
+        php_version: "7.4+"
+        dependencies: "WordPress admin functions (esc_html)"
+        reusable: "No — template"
+
+    - path: "tests/test-async.php"
+      dna:
+        file: "tests/test-async.php"
+        version: "1.0.0"
+        purpose: "Test async job scheduling, processing, and status retrieval"
+        author: "C-C (Session 05, Sprint 3)"
+        spec: "sprint3_d1_d7.yaml D2 test_async"
+        test_count: 8
+
+    - path: "tests/test-meta-box.php"
+      dna:
+        file: "tests/test-meta-box.php"
+        version: "1.0.0"
+        purpose: "Test meta box registration and render logic"
+        author: "C-C (Session 05, Sprint 3)"
+        spec: "sprint3_d1_d7.yaml D2 test_meta_box"
+        test_count: 6
+
+  modified_files:
+
+    - path: "plugin/consensuspress/consensuspress.php"
+      dna_version_bump: "1.1.0 → 1.2.0"
+      changes:
+        - "ADD require_once for class-consensuspress-async.php"
+        - "ADD require_once for class-consensuspress-meta-box.php"
+        - "ADD ConsensusPress_Async and ConsensusPress_Meta_Box instantiation in init()"
+        - "MODIFY consensuspress_ajax_create_post() body — now schedules job"
+        - "ADD consensuspress_ajax_poll_job() function"
+        - "ADD wp_ajax_consensuspress_poll_job hook"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-create.php"
+      dna_version_bump: "1.0.0 → 1.1.0"
+      changes:
+        - "ADD 'poll_nonce' to wp_localize_script consensuspressCreate object"
+
+    - path: "plugin/consensuspress/admin/js/consensuspress-create.js"
+      dna_version_bump: "1.0.0 → 1.1.0"
+      changes:
+        - "REWRITE handleSubmit to expect job_id response"
+        - "ADD startPolling( job_id ) method"
+        - "ADD poll( job_id, attempts ) method with max attempt guard"
+
+    - path: "plugin/consensuspress/admin/css/consensuspress-admin.css"
+      dna_version_bump: "1.1.0 → 1.2.0"
+      changes: "APPEND meta box styles + polling status styles (no existing rules changed)"
+
+# =============================================================================
+# D5: DEPENDENCY MAP
+# =============================================================================
+d5_dependencies:
+
+  class_consensuspress_async:
+    depends_on:
+      - "ConsensusPress_API (Sprint 1 — consumed, not modified)"
+      - "ConsensusPress_Post_Builder (Sprint 2 — consumed, not modified)"
+      - "WordPress: set_transient, get_transient, delete_transient"
+      - "WordPress: wp_schedule_single_event, wp_generate_uuid4"
+      - "WordPress: wp_remote_post, site_url, apply_filters"
+    depended_on_by:
+      - "consensuspress_ajax_create_post() (schedules job)"
+      - "consensuspress_ajax_poll_job() (reads status)"
+      - "WP-Cron (calls process_job)"
+
+  class_consensuspress_meta_box:
+    depends_on:
+      - "WordPress: add_meta_box, get_post_meta"
+      - "admin/views/meta-box.php (template)"
+    depended_on_by:
+      - "consensuspress_init() (instantiates and calls init())"
+
+  admin_views_meta_box:
+    depends_on:
+      - "$meta array from render_meta_box()"
+      - "WordPress: esc_html, number_format, esc_attr"
+    depended_on_by:
+      - "ConsensusPress_Meta_Box::render_meta_box()"
+
+# =============================================================================
+# D6: NEW WORDPRESS FUNCTION STUBS (add to tests/bootstrap.php)
+# =============================================================================
+d6_new_stubs:
+  note: "Extend existing tests/bootstrap.php. Do not remove any existing stubs."
+
+  new_stubs:
+    - "set_transient( string $transient, $value, int $expiration ): bool — stores in global array"
+    - "get_transient( string $transient ) — reads from global array, returns false if missing"
+    - "delete_transient( string $transient ): bool — removes from global array"
+    - "wp_schedule_single_event( int $timestamp, string $hook, array $args ): bool — no-op, returns true"
+    - "wp_generate_uuid4(): string — returns deterministic test UUID e.g. 'test-uuid-' . uniqid()"
+    - "site_url( string $path = '' ): string — returns 'https://example.com/' . ltrim($path,'/')"
+    - "apply_filters( string $tag, $value, ...$args ) — returns $value unchanged"
+    - "add_meta_box( string $id, string $title, callable $cb, $screen, string $context, string $priority ): void — no-op"
+    - "get_post_meta( int $post_id, string $key, bool $single ): mixed — reads from global post meta store"
+    - "number_format( float $num, int $decimals ): string — native PHP, no stub needed"
+    - "WP_Post stub class: public $ID = 0; public $post_title = ''; public $post_status = 'draft';"
+
+  helper_additions:
+    - "cp_test_reset_globals() must reset: _cp_transients, _cp_scheduled_cron_events"
+
+# =============================================================================
+# D7: VERIFICATION CHECKLIST
+# =============================================================================
+d7_verification:
+
+  scanner_gates:
+    - gate: "hal001_php_scanner"
+      command: "php hal001_php_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+    - gate: "wp_compliance_scanner"
+      command: "php wp_compliance_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+  test_gates:
+    - gate: "All Sprint 1 + Sprint 2 tests still pass"
+      command: "phpunit --bootstrap tests/bootstrap.php tests/test-api-client.php tests/test-settings.php tests/test-create.php tests/test-post-builder.php"
+      expected: "36 tests, all pass"
+
+    - gate: "New Sprint 3 tests pass"
+      command: "phpunit --bootstrap tests/bootstrap.php tests/test-async.php tests/test-meta-box.php"
+      expected: "14 tests (8+6), all pass on first run"
+
+  manual_checklist:
+    - "All Sprint 2 callables preserved — especially ConsensusPress_Post_Builder::create_draft()"
+    - "consensuspress_ajax_create_post() signature unchanged (only body changed)"
+    - "All new PHP files have complete DNA headers"
+    - "All new methods have full PHPDoc with WordPress hash notation"
+    - "ABSPATH guard in every new PHP file and template"
+    - "No inline JS or CSS"
+    - "Both nonces verified: consensuspress_create_post AND consensuspress_poll_job"
+    - "Capability check in both AJAX handlers"
+    - "All output in meta-box.php wrapped in esc_html()"
+    - "score cast to float before display (prevents type issues)"
+    - "All 7 D3 contracts balanced"
+    - "poll_nonce added to enqueue_create_assets() localization"
+    - "WP-Cron hook name in CRON_HOOK constant matches add_action string exactly"
+    - "process_job() idempotent guard present (checks status === 'pending')"
+    - "spawn_cron() uses blocking=false (non-blocking loopback)"
+
+# =============================================================================
+# END OF SPRINT 3 D1-D7 SPECIFICATION
+# =============================================================================

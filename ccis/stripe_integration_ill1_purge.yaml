@@ -1,0 +1,626 @@
+# =============================================================================
+# C-C INSTRUCTION: CCI-116-02
+# =============================================================================
+# file:             ccis/stripe_integration_ill1_purge.yaml
+# instruction_id:   CCI-116-02
+# created:          2026-02-28
+# session:          116
+# template_version: "2.0.0"
+# status:           SPEC_LINT_PASSED
+# =============================================================================
+# C-C STOP RULES (READ FIRST — NON-NEGOTIABLE)
+# =============================================================================
+# STOP-1 (ILL 1): Dict boundary not named in D1?
+#         STOP. Report to D-C. Do NOT invent Dict[str, Any].
+# STOP-2 (ILL 4): Function in D0 absent from your output?
+#         STOP. Confirm with D-C before omitting.
+# STOP-3 (ILL 3): LLM-calling function lacks format contract in D3?
+#         STOP. Report to D-C.
+# STOP-4 (ALL):   Anything in D1–D7 ambiguous or missing?
+#         STOP and escalate. Do NOT assume. Do NOT continue.
+# STOP-5 (ILL 4): Delivering without preservation_manifest?
+#         STOP. Manifest required.
+# STOP-6 (TYPE-B): Deferred violations marked TYPE-B in D1?
+#         Add HAL_DEFER comment only. Do NOT change the annotation.
+# =============================================================================
+
+instruction_header:
+  instruction_id:   "CCI-116-02"
+  created:          "2026-02-28"
+  session:          116
+  template_version: "2.0.0"
+  status:           "SPEC_LINT_PASSED"
+
+  target:
+    script_path:    "src/billing/stripe_integration.py"
+    script_name:    "stripe_integration"
+    gps_coordinate: "fr_02_uc_billing_ec_01_tc_001"
+
+  test_target:
+    test_file_path:       "tests/test_stripe_integration_ill1_purge.py"
+    d4_scenarios_covered: ["HP-001","HP-002","HP-003","HP-004","EH-001","EH-002"]
+
+  task_type: "modification"
+  priority:  "P0"
+
+# =============================================================================
+# CONTEXT
+# =============================================================================
+context: |
+  Sprint C Phase 1B — ILL-1 (type erasure) purge for stripe_integration.py.
+  16 HAL-001 violations confirmed by hal001_scanner.py (baseline_115.yaml).
+
+  SPLIT OUTCOME after D-C analysis:
+    IN-SPRINT:  10 violations — 5 TypedDicts defined in D1.
+    TYPE-B:      6 violations — raw Stripe SDK objects, deferred.
+
+  TYPE-B rationale: Functions create_customer, create_subscription,
+  update_subscription, cancel_subscription, create_checkout_session,
+  create_billing_portal_session return raw Stripe SDK response objects.
+  Stripe Python ≥5.0 publishes full type stubs. Proper fix requires
+  importing stripe.Customer, stripe.Subscription etc. or mirroring
+  their response schemas as TypedDicts. Scope exceeds this sprint.
+  Deferred to Sprint C+1.
+
+  C-C TASK:
+  1. Add 5 TypedDict class definitions after import block
+  2. Replace 10 IN-SPRINT Dict[str, Any] return annotations
+  3. Add HAL_DEFER: TYPE-B comments to 6 deferred annotations — DO NOT
+     change the annotation itself, only add the comment on the line above
+  4. Modify typing import: remove Any, add TypedDict
+  5. ALL function bodies, logic, Stripe calls untouched
+
+  CRITICAL: _handle_payment_failed already uses PaymentFailedResult.
+  DO NOT touch it. It is NOT a violation.
+
+# =============================================================================
+# D0: PRESERVATION CONTRACT
+# =============================================================================
+d0_preservation_contract:
+
+  source_file:             "src/billing/stripe_integration.py"
+  inventory_generated_by:  "tools/inventory_file.py (D-C sandbox equivalent)"
+  inventory_date:          "2026-02-28"
+  inventory_sha256:        "5dd88d55183374093ee22cf1799e40245f3c262fed7d3228478f3ee69ec80cf6"
+  function_count:          30
+  note:                    "Modification — all 30 functions must be preserved"
+
+  functions:
+    - name: "get_customer_by_email"
+      line: 103
+      must_preserve: true
+    - name: "create_stripe_customer"
+      line: 136
+      must_preserve: true
+    - name: "insert_customer_db"
+      line: 155
+      must_preserve: true
+    - name: "get_or_create_customer"
+      line: 189
+      must_preserve: true
+    - name: "update_customer_tier_by_stripe_id"
+      line: 217
+      must_preserve: true
+    - name: "get_customer_id_by_stripe_id"
+      line: 253
+      must_preserve: true
+    - name: "upsert_subscription"
+      line: 279
+      must_preserve: true
+    - name: "_ensure_grace_period_column"
+      line: 341
+      must_preserve: true
+    - name: "set_payment_grace_period"
+      line: 364
+      must_preserve: true
+    - name: "get_user_tier_by_email"
+      line: 392
+      must_preserve: true
+    - name: "get_queries_this_month"
+      line: 461
+      must_preserve: true
+    - name: "check_tier_limits"
+      line: 495
+      must_preserve: true
+    - name: "__init__"
+      line: 580
+      must_preserve: true
+    - name: "get_tier_limits"
+      line: 594
+      must_preserve: true
+    - name: "create_customer"
+      line: 598
+      must_preserve: true
+    - name: "create_subscription"
+      line: 614
+      must_preserve: true
+    - name: "update_subscription"
+      line: 644
+      must_preserve: true
+    - name: "cancel_subscription"
+      line: 675
+      must_preserve: true
+    - name: "get_customer_tier"
+      line: 696
+      must_preserve: true
+    - name: "create_checkout_session"
+      line: 716
+      must_preserve: true
+    - name: "create_billing_portal_session"
+      line: 749
+      must_preserve: true
+    - name: "retrieve_checkout_session"
+      line: 766
+      must_preserve: true
+    - name: "handle_webhook"
+      line: 785
+      must_preserve: true
+    - name: "_handle_subscription_created"
+      line: 817
+      must_preserve: true
+    - name: "_handle_subscription_updated"
+      line: 855
+      must_preserve: true
+    - name: "_handle_subscription_deleted"
+      line: 894
+      must_preserve: true
+    - name: "_handle_payment_succeeded"
+      line: 925
+      must_preserve: true
+    - name: "_handle_payment_failed"
+      line: 938
+      must_preserve: true
+      note: "Already uses PaymentFailedResult — DO NOT TOUCH"
+    - name: "_handle_checkout_completed"
+      line: 1020
+      must_preserve: true
+    - name: "get_stripe_integration"
+      line: 1046
+      must_preserve: true
+
+  removal_approvals: []
+
+# =============================================================================
+# D1: TYPE CONTRACTS (ILL-1 GUARDRAIL)
+# =============================================================================
+d1_type_contracts:
+
+  vocabulary_constraint: |
+    C-C MUST use ONLY types defined here.
+    TYPE-B deferrals: add HAL_DEFER comment above the annotation line only.
+    Do NOT change TYPE-B annotations. Do NOT invent new types.
+
+  in_sprint_violations: 10
+  type_b_violations:    6
+
+  new_types:
+
+    - name: "CustomerRecord"
+      kind: "TypedDict"
+      total: true
+      purpose: |
+        Return type for get_customer_by_email.
+        Annotation becomes: Optional[CustomerRecord]
+        Represents a row from the customers table.
+      fields:
+        - name: "customer_id"
+          type: "str"
+          description: "Internal DB customer ID"
+        - name: "stripe_customer_id"
+          type: "str"
+          description: "Stripe customer ID (cus_xxx)"
+        - name: "tier"
+          type: "str"
+          description: "Current tier name: seeker | acolyte | oracle | sage"
+
+    - name: "CustomerResult"
+      kind: "TypedDict"
+      total: true
+      purpose: |
+        Return type for get_or_create_customer.
+        Extends CustomerRecord fields with is_new flag.
+      fields:
+        - name: "customer_id"
+          type: "str"
+        - name: "stripe_customer_id"
+          type: "str"
+        - name: "tier"
+          type: "str"
+        - name: "is_new"
+          type: "bool"
+          description: "True if customer was created in this call"
+
+    - name: "UserTierInfo"
+      kind: "TypedDict"
+      total: true
+      purpose: |
+        Return type for get_user_tier_by_email.
+        Contains tier name, code, and all limit fields.
+      fields:
+        - name: "tier_name"
+          type: "str"
+          description: "Tier name: seeker | acolyte | oracle | sage"
+        - name: "tier_code"
+          type: "str"
+          description: "Tier code: SEK | AKO | ORA | SAG"
+        - name: "max_tokens"
+          type: "int"
+          description: "Maps to query_length_chars from TIER_CONFIG"
+        - name: "queries_per_day"
+          type: "int"
+          description: "Daily query limit (0 = unlimited)"
+        - name: "queries_per_month"
+          type: "int"
+          description: "Monthly query limit"
+        - name: "query_length_chars"
+          type: "int"
+          description: "Max query length in characters"
+
+    - name: "TierConfig"
+      kind: "TypedDict"
+      total: false
+      purpose: |
+        Return type for get_tier_limits.
+        Mirrors TIER_CONFIG dict values.
+        total=False: queries_per_day and price_env are None on free tier.
+      fields:
+        - name: "code"
+          type: "str"
+          description: "Tier code: SEK | AKO | ORA | SAG"
+        - name: "price_env"
+          type: "Optional[str]"
+          description: "Stripe price env var name. None for free tier."
+        - name: "queries_per_month"
+          type: "int"
+        - name: "queries_per_day"
+          type: "Optional[int]"
+          description: "None = unlimited (paid tiers)"
+        - name: "query_length_chars"
+          type: "int"
+
+    - name: "WebhookHandlerResult"
+      kind: "TypedDict"
+      total: false
+      purpose: |
+        Return type for handle_webhook and all _handle_* functions.
+        total=False: fields vary per handler path.
+        Covers both handled paths (all handler functions) and
+        the unhandled path in handle_webhook.
+      fields:
+        - name: "status"
+          type: "str"
+          always_present: true
+          values: "'handled' | 'unhandled'"
+        - name: "action"
+          type: "str"
+          always_present: false
+          description: "Present on handled paths only"
+        - name: "type"
+          type: "str"
+          always_present: false
+          description: "Present on unhandled path only — Stripe event type"
+        - name: "stripe_customer_id"
+          type: "str"
+          always_present: false
+        - name: "stripe_subscription_id"
+          type: "str"
+          always_present: false
+        - name: "tier"
+          type: "str"
+          always_present: false
+        - name: "db_updated"
+          type: "bool"
+          always_present: false
+        - name: "subscription_upserted"
+          type: "bool"
+          always_present: false
+        - name: "subscription_status"
+          type: "str"
+          always_present: false
+          description: "_handle_subscription_updated only"
+        - name: "new_tier"
+          type: "str"
+          always_present: false
+          description: "_handle_subscription_deleted only"
+        - name: "customer_id"
+          type: "str"
+          always_present: false
+          description: "_handle_payment_succeeded only"
+
+  deferred:
+
+    - violation_line: 598
+      function: "create_customer"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: |
+        Returns raw Stripe Customer SDK object. Stripe Python ≥5.0 has
+        type stubs (stripe.Customer). Requires importing Stripe types
+        or mirroring Customer schema. Deferred to Sprint C+1.
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe Customer object, Sprint C+1
+        Do NOT change the annotation.
+
+    - violation_line: 619
+      function: "create_subscription"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: "Returns raw Stripe Subscription SDK object."
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe Subscription object, Sprint C+1
+
+    - violation_line: 648
+      function: "update_subscription"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: "Returns raw Stripe Subscription SDK object."
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe Subscription object, Sprint C+1
+
+    - violation_line: 679
+      function: "cancel_subscription"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: "Returns raw Stripe Subscription/DeletedSubscription SDK object."
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe Subscription object, Sprint C+1
+
+    - violation_line: 722
+      function: "create_checkout_session"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: "Returns raw Stripe Checkout Session SDK object."
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe CheckoutSession object, Sprint C+1
+
+    - violation_line: 753
+      function: "create_billing_portal_session"
+      current_annotation: "-> Dict[str, Any]"
+      classification: "TYPE-B"
+      reason: "Returns raw Stripe BillingPortal Session SDK object."
+      c_c_action: |
+        Add comment on line ABOVE the annotation:
+        # HAL_DEFER: TYPE-B — Stripe BillingPortal.Session object, Sprint C+1
+
+# =============================================================================
+# D2: DOUBLE-ENTRY CONTRACTS (ILL-2 GUARDRAIL)
+# =============================================================================
+d2_double_entry_contracts:
+
+  balance_check: "BALANCED"
+
+  flows:
+
+    - producer:         "stripe_integration.py:get_customer_by_email()"
+      output:           "Optional[CustomerRecord]"
+      consumer:         "stripe_integration.py:get_or_create_customer() — existing variable"
+      input:            "CustomerRecord (existing dict spread via **existing)"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:get_or_create_customer()"
+      output:           "CustomerResult"
+      consumer:         "src/server/main.py or API layer (external)"
+      input:            "CustomerResult — reads customer_id, stripe_customer_id, tier"
+      contract_match:   "YES"
+      validation_point: "ILL-2 enforced at API layer CCI"
+
+    - producer:         "stripe_integration.py:get_user_tier_by_email()"
+      output:           "UserTierInfo"
+      consumer:         "stripe_integration.py:check_tier_limits() — tier_info variable"
+      input:            "UserTierInfo — reads tier_name, queries_per_day, queries_per_month"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:get_tier_limits()"
+      output:           "TierConfig"
+      consumer:         "StripeIntegration internal methods"
+      input:            "TierConfig — reads code, queries_per_month, query_length_chars"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:_handle_subscription_created()"
+      output:           "WebhookHandlerResult"
+      consumer:         "stripe_integration.py:handle_webhook() — return handler(event)"
+      input:            "WebhookHandlerResult (passed through)"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:_handle_subscription_updated()"
+      output:           "WebhookHandlerResult"
+      consumer:         "stripe_integration.py:handle_webhook()"
+      input:            "WebhookHandlerResult"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:_handle_subscription_deleted()"
+      output:           "WebhookHandlerResult"
+      consumer:         "stripe_integration.py:handle_webhook()"
+      input:            "WebhookHandlerResult"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:_handle_payment_succeeded()"
+      output:           "WebhookHandlerResult"
+      consumer:         "stripe_integration.py:handle_webhook()"
+      input:            "WebhookHandlerResult"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:_handle_checkout_completed()"
+      output:           "WebhookHandlerResult"
+      consumer:         "stripe_integration.py:handle_webhook()"
+      input:            "WebhookHandlerResult"
+      contract_match:   "YES"
+
+    - producer:         "stripe_integration.py:handle_webhook()"
+      output:           "WebhookHandlerResult"
+      consumer:         "src/server/main.py webhook endpoint (external)"
+      input:            "WebhookHandlerResult — reads status field"
+      contract_match:   "YES"
+      validation_point: "ILL-2 enforced at main.py CCI"
+
+# =============================================================================
+# D3: FORMAT CONTRACTS (ILL-3 GUARDRAIL)
+# =============================================================================
+d3_format_contracts:
+  llm_functions_present: false
+  note: "stripe_integration.py makes Stripe API calls, not LLM calls. D3 N/A."
+
+# =============================================================================
+# D4: TEST SCENARIOS
+# =============================================================================
+d4_test_scenarios:
+
+  scenarios:
+
+    - id: "HP-001"
+      name: "customer_record_typeddict_shape"
+      pytest: "test_customer_record_typeddict_shape"
+      description: |
+        CustomerRecord TypedDict has exactly 3 fields:
+        customer_id, stripe_customer_id, tier. All str.
+      given:
+        TypedDict: "CustomerRecord"
+      expected:
+        fields: ["customer_id", "stripe_customer_id", "tier"]
+        all_types: "str"
+
+    - id: "HP-002"
+      name: "customer_result_extends_with_is_new"
+      pytest: "test_customer_result_extends_with_is_new"
+      description: |
+        CustomerResult has 4 fields: customer_id, stripe_customer_id,
+        tier (str), is_new (bool).
+      given:
+        TypedDict: "CustomerResult"
+      expected:
+        fields: ["customer_id", "stripe_customer_id", "tier", "is_new"]
+
+    - id: "HP-003"
+      name: "user_tier_info_has_six_fields"
+      pytest: "test_user_tier_info_has_six_fields"
+      description: |
+        UserTierInfo has 6 fields covering all TIER_CONFIG limit keys.
+      given:
+        TypedDict: "UserTierInfo"
+      expected:
+        fields: ["tier_name","tier_code","max_tokens","queries_per_day",
+                 "queries_per_month","query_length_chars"]
+
+    - id: "HP-004"
+      name: "webhook_handler_result_covers_all_handler_fields"
+      pytest: "test_webhook_handler_result_covers_all_handler_fields"
+      description: |
+        WebhookHandlerResult (total=False) carries status + all optional
+        fields from all 5 handler return shapes.
+      given:
+        TypedDict: "WebhookHandlerResult"
+        test_cases:
+          - "handled path: status=handled, action=subscription_created"
+          - "unhandled path: status=unhandled, type=unknown.event"
+      expected:
+        required_in_all: ["status"]
+        optional_fields_present: ["action","type","stripe_customer_id",
+                                  "stripe_subscription_id","tier",
+                                  "db_updated","subscription_upserted"]
+
+    - id: "EH-001"
+      name: "type_b_deferrals_have_hal_defer_comments"
+      pytest: "test_type_b_deferrals_have_hal_defer_comments"
+      description: |
+        AST + source scan confirms all 6 TYPE-B functions have
+        HAL_DEFER comments. Their annotations remain Dict[str, Any].
+      given:
+        file: "src/billing/stripe_integration.py"
+        type_b_functions: ["create_customer","create_subscription",
+                           "update_subscription","cancel_subscription",
+                           "create_checkout_session","create_billing_portal_session"]
+      expected:
+        each_function_has_hal_defer_comment: true
+        annotation_unchanged: "Dict[str, Any]"
+
+    - id: "EH-002"
+      name: "in_sprint_violations_resolved_zero_undeferred"
+      pytest: "test_in_sprint_violations_resolved_zero_undeferred"
+      description: |
+        After purge: hal001_scanner reports 0 undeferred violations.
+        The 6 TYPE-B deferrals carry HAL_DEFER annotations so scanner
+        suppresses them. Net undeferred count = 0.
+      given:
+        file: "src/billing/stripe_integration.py"
+      expected:
+        undeferred_violations: 0
+
+# =============================================================================
+# D5: DIRECTORY MAP
+# =============================================================================
+d5_directory_map:
+
+  target_file:      "src/billing/stripe_integration.py"
+  production_file:  "src/billing/stripe_integration.py"
+  test_file:        "tests/test_stripe_integration_ill1_purge.py"
+  manifest_path:    "tools/manifests/preservation_manifest_CCI-116-02.yaml"
+  outputs_dir:      "/mnt/user-data/outputs/"
+
+  new_directories_required: []
+
+# =============================================================================
+# D6: IMPORT SPECIFICATION
+# =============================================================================
+d6_import_specification:
+
+  change_description: |
+    MODIFY existing typing import line.
+    Find: from typing import Dict, Any, Optional, List, Tuple (or similar)
+    Replace: add TypedDict, remove Any IF Any has no remaining uses.
+    NOTE: Verify Any has no other uses before removing.
+    If Any appears elsewhere, keep it and only add TypedDict.
+
+  typeddict_placement: |
+    Add the 5 TypedDict class definitions AFTER the import block
+    and BEFORE the module-level constants (TIER_CONFIG definition).
+    Insert between imports and TIER_CONFIG = {...}.
+
+  test_file_imports:
+    - "import pytest"
+    - "import ast"
+    - "import sys"
+    - "from pathlib import Path"
+
+# =============================================================================
+# D7: TEST INFRASTRUCTURE
+# =============================================================================
+d7_test_infrastructure:
+
+  conftest_updates: []
+
+  strategy: |
+    Same approach as CCI-116-01: pure shape contract tests.
+    Extract TypedDict class definitions from stripe_integration.py
+    via AST exec — no module import required, no Stripe SDK needed.
+
+    EH-001: Source text scan for HAL_DEFER comment strings.
+    EH-002: AST scan for undeferred Dict[str, Any] violations.
+    hal001_scanner.py suppression rule: lines with # HAL_DEFER
+    are treated as deferred — undeferred count must be 0.
+
+  note_on_eh_002: |
+    EH-002 checks that hal001_scanner UNDEFERRED count = 0.
+    The scanner suppresses violations annotated with HAL_DEFER.
+    If scanner does not support HAL_DEFER suppression, EH-002
+    checks that all remaining Dict[str, Any] lines have HAL_DEFER
+    comments in the source (manual verification path).
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-28"
+    author: "D-C (Session 116)"
+    changes: |
+      Sprint C Phase 1B — ILL-1 purge for stripe_integration.py.
+      10 IN-SPRINT violations, 6 TYPE-B deferred.
+
+# =============================================================================
+# END CCI-116-02
+# =============================================================================

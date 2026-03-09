@@ -1,0 +1,1483 @@
+# =============================================================================
+# C-C INSTRUCTIONS: SPRINT 1 — FOUNDATION
+# =============================================================================
+# Document: sprint1_d1_d7_cc_instructions.yaml
+# Project:  ConsensusPress by Seekrates
+# Sprint:   1 of 6 — Plugin Skeleton + API Client + Settings
+# Author:   D-C (Session 02)
+# Date:     2026-02-26
+# Method:   AFD v1.3.0
+# Status:   PENDING MOHAN APPROVAL → then C-C executes
+# =============================================================================
+# C-C: You implement ONLY what is defined here. If something is missing,
+# STOP and ask D-C. Do NOT invent. Do NOT improvise. Do NOT design.
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# SPRINT 1 SCOPE
+# =============================================================================
+scope:
+  in_scope:
+    - "consensuspress.php (main plugin file — header, activation, hooks)"
+    - "includes/class-consensuspress-api.php (API client with transport injection)"
+    - "includes/class-consensuspress-settings.php (Settings API registration + page)"
+    - "admin/views/settings.php (settings page template)"
+    - "admin/css/consensuspress-admin.css (scaffold styles only)"
+    - "admin/js/consensuspress-admin.js (scaffold — API key test button)"
+    - "readme.txt (WordPress.org listing)"
+    - "tests/bootstrap.php (PHPUnit bootstrap)"
+    - "tests/class-consensuspress-mock-transport.php (mock transport)"
+    - "tests/test-api-client.php (API client tests)"
+    - "tests/test-settings.php (settings tests)"
+
+  out_of_scope:
+    - "class-consensuspress-create.php (Sprint 2)"
+    - "class-consensuspress-rescue.php (Sprint 4)"
+    - "class-consensuspress-post-builder.php (Sprint 3)"
+    - "class-consensuspress-rank-math.php (Sprint 3)"
+    - "class-consensuspress-schema.php (Sprint 3)"
+    - "class-consensuspress-diff.php (Sprint 4)"
+    - "admin/views/create.php (Sprint 2)"
+    - "admin/views/rescue.php (Sprint 4)"
+    - "admin/views/results-metabox.php (Sprint 5)"
+    - "admin/views/diff-viewer.php (Sprint 4)"
+    - "Server-side /api/v1/consensus endpoint (separate project)"
+
+# =============================================================================
+# D1: TYPED CLASS SIGNATURES
+# =============================================================================
+# Every class, interface, method, property, constant defined here.
+# C-C copies these signatures EXACTLY. No additions. No omissions.
+# =============================================================================
+d1_class_signatures:
+
+  # ---------------------------------------------------------------------------
+  # CONSTANTS (defined in consensuspress.php)
+  # ---------------------------------------------------------------------------
+  constants:
+    CONSENSUSPRESS_VERSION:
+      value: "'1.0.0'"
+      type: "string"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_PLUGIN_DIR:
+      value: "plugin_dir_path( __FILE__ )"
+      type: "string"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_PLUGIN_URL:
+      value: "plugin_dir_url( __FILE__ )"
+      type: "string"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_API_ENDPOINT:
+      value: "'https://app.seekrates-ai.com/api/v1/consensus'"
+      type: "string"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_API_TIMEOUT:
+      value: "120"
+      type: "int"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_MAX_RETRIES:
+      value: "3"
+      type: "int"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_MIN_WP:
+      value: "'6.2'"
+      type: "string"
+      defined_in: "consensuspress.php"
+    CONSENSUSPRESS_MIN_PHP:
+      value: "'7.4'"
+      type: "string"
+      defined_in: "consensuspress.php"
+
+  # ---------------------------------------------------------------------------
+  # OPTION KEYS (wp_options table)
+  # ---------------------------------------------------------------------------
+  option_keys:
+    consensuspress_api_key:
+      type: "string"
+      sanitize: "sanitize_text_field"
+      default: "''"
+      description: "Seekrates API key (Bearer token)"
+    consensuspress_default_category:
+      type: "int"
+      sanitize: "absint"
+      default: "0"
+      description: "Default category ID for new posts (0 = Uncategorized)"
+    consensuspress_default_status:
+      type: "string"
+      sanitize: "sanitize_text_field"
+      default: "'draft'"
+      allowed_values: ["draft", "pending"]
+      description: "Default post status for created posts"
+    consensuspress_notification_email:
+      type: "string"
+      sanitize: "sanitize_email"
+      default: "get_option('admin_email')"
+      description: "Email for completion notifications (empty = disabled)"
+    consensuspress_usage_count:
+      type: "int"
+      sanitize: "absint"
+      default: "0"
+      description: "Monthly usage counter (reset by server)"
+    consensuspress_usage_limit:
+      type: "int"
+      sanitize: "absint"
+      default: "3"
+      description: "Monthly usage limit from tier (3 = free tier)"
+    consensuspress_tier:
+      type: "string"
+      sanitize: "sanitize_text_field"
+      default: "'free'"
+      description: "Current subscription tier"
+
+  # ---------------------------------------------------------------------------
+  # INTERFACE: ConsensusPress_Transport_Interface
+  # ---------------------------------------------------------------------------
+  transport_interface:
+    file: "includes/class-consensuspress-api.php"
+    name: "ConsensusPress_Transport_Interface"
+    purpose: "Abstraction for HTTP transport — enables mock injection"
+    methods:
+      post:
+        visibility: "public"
+        params:
+          url:
+            type: "string"
+            description: "Full endpoint URL"
+          args:
+            type: "array"
+            description: "wp_remote_post compatible args (headers, body, timeout)"
+        return: "array|WP_Error"
+        return_shape: |
+          array{
+            'response' => array{ 'code' => int, 'message' => string },
+            'body'     => string
+          }
+        phpdoc: |
+          /**
+           * Send HTTP POST request.
+           *
+           * @param string $url  Endpoint URL.
+           * @param array  $args Request arguments (headers, body, timeout).
+           * @return array|WP_Error Response array or WP_Error on failure.
+           */
+
+  # ---------------------------------------------------------------------------
+  # CLASS: ConsensusPress_WP_Transport
+  # ---------------------------------------------------------------------------
+  wp_transport:
+    file: "includes/class-consensuspress-api.php"
+    name: "ConsensusPress_WP_Transport"
+    implements: "ConsensusPress_Transport_Interface"
+    purpose: "Production transport — wraps wp_remote_post()"
+    methods:
+      post:
+        visibility: "public"
+        params:
+          url: { type: "string" }
+          args: { type: "array" }
+        return: "array|WP_Error"
+        implementation: "return wp_remote_post( $url, $args );"
+        phpdoc: |
+          /**
+           * Send POST request via WordPress HTTP API.
+           *
+           * @param string $url  Endpoint URL.
+           * @param array  $args Request arguments.
+           * @return array|WP_Error Response array or WP_Error on failure.
+           */
+
+  # ---------------------------------------------------------------------------
+  # CLASS: ConsensusPress_API
+  # ---------------------------------------------------------------------------
+  api_class:
+    file: "includes/class-consensuspress-api.php"
+    name: "ConsensusPress_API"
+    purpose: "All communication with Seekrates AI. Thin client — no intelligence."
+
+    properties:
+      api_key:
+        visibility: "private"
+        type: "string"
+        description: "Seekrates API Bearer token"
+      transport:
+        visibility: "private"
+        type: "ConsensusPress_Transport_Interface"
+        description: "HTTP transport (injected or default WP)"
+
+    constructor:
+      params:
+        api_key:
+          type: "string"
+          description: "Seekrates API key"
+        transport:
+          type: "ConsensusPress_Transport_Interface|null"
+          default: "null"
+          description: "Injectable transport. null = ConsensusPress_WP_Transport"
+      logic: |
+        $this->api_key = $api_key;
+        $this->transport = $transport ?? new ConsensusPress_WP_Transport();
+      phpdoc: |
+        /**
+         * Constructor.
+         *
+         * @param string                                  $api_key   Seekrates API key.
+         * @param ConsensusPress_Transport_Interface|null  $transport HTTP transport (null = default WP).
+         */
+
+    methods:
+      query:
+        visibility: "public"
+        purpose: "Send consensus query to Seekrates API"
+        params:
+          query:
+            type: "string"
+            description: "Topic (create) or post content (rescue)"
+          mode:
+            type: "string"
+            description: "'create' or 'rescue'"
+          context:
+            type: "string"
+            default: "''"
+            description: "Optional steering context"
+        return_type: "array"
+        return_shape: |
+          array{
+            'success'     => bool,
+            'data'        => array|null,
+            'error'       => array{ 'code' => string, 'message' => string }|null,
+            'http_status' => int
+          }
+        logic_steps:
+          - "1. Validate inputs: query min 10 chars, mode in ['create','rescue']"
+          - "2. Build request body JSON: query, mode, context, output_format='json'"
+          - "3. Build headers: Content-Type application/json, Authorization Bearer"
+          - "4. Call $this->transport->post() with CONSENSUSPRESS_API_ENDPOINT"
+          - "5. If WP_Error, return error array with code='connection_error'"
+          - "6. Extract HTTP status code from response"
+          - "7. Decode JSON body with json_decode( $body, true )"
+          - "8. If JSON decode fails, return error with code='invalid_response'"
+          - "9. If HTTP 200, return success=true with parsed data"
+          - "10. If HTTP 4xx/5xx, return success=false with error from response body"
+        error_codes:
+          connection_error: "wp_remote_post failed (WP_Error)"
+          invalid_response: "Response body is not valid JSON"
+          unauthorized: "HTTP 401 — invalid API key"
+          usage_exceeded: "HTTP 402 — monthly limit reached"
+          bad_request: "HTTP 400 — malformed request"
+          rate_limited: "HTTP 429 — too many requests"
+          server_error: "HTTP 500 — Seekrates server error"
+          timeout: "HTTP 504 — consensus query timed out"
+        phpdoc: |
+          /**
+           * Send consensus query to Seekrates AI.
+           *
+           * @param string $query   Topic or post content.
+           * @param string $mode    'create' or 'rescue'.
+           * @param string $context Optional context to steer consensus.
+           * @return array{success: bool, data: array|null, error: array|null, http_status: int}
+           */
+
+      test_connection:
+        visibility: "public"
+        purpose: "Validate API key by sending minimal test query"
+        params: "(none)"
+        return_type: "array"
+        return_shape: |
+          array{
+            'success' => bool,
+            'message' => string
+          }
+        logic_steps:
+          - "1. Call $this->query('ConsensusPress connection test', 'create')"
+          - "2. If success=true, return success=true, message='Connected'"
+          - "3. If error code='unauthorized', return success=false, message='Invalid API key'"
+          - "4. All other errors: return success=false, message=error message from response"
+        phpdoc: |
+          /**
+           * Test API connection with current key.
+           *
+           * @return array{success: bool, message: string}
+           */
+
+      get_usage:
+        visibility: "public"
+        purpose: "Get current usage stats from local options (not API call)"
+        params: "(none)"
+        return_type: "array"
+        return_shape: |
+          array{
+            'used'  => int,
+            'limit' => int,
+            'tier'  => string
+          }
+        logic_steps:
+          - "1. Return array from wp_options: usage_count, usage_limit, tier"
+        phpdoc: |
+          /**
+           * Get current usage statistics.
+           *
+           * @return array{used: int, limit: int, tier: string}
+           */
+
+  # ---------------------------------------------------------------------------
+  # CLASS: ConsensusPress_Settings
+  # ---------------------------------------------------------------------------
+  settings_class:
+    file: "includes/class-consensuspress-settings.php"
+    name: "ConsensusPress_Settings"
+    purpose: "WordPress Settings API registration and admin page rendering"
+
+    properties:
+      option_group:
+        visibility: "private"
+        type: "string"
+        value: "'consensuspress_settings'"
+        description: "Settings group name for register_setting()"
+      page_slug:
+        visibility: "private"
+        type: "string"
+        value: "'consensuspress'"
+        description: "Admin menu page slug"
+
+    constructor:
+      params: "(none)"
+      logic: "Empty — all registration via hooks"
+
+    methods:
+      init:
+        visibility: "public"
+        purpose: "Register all WordPress hooks — called from consensuspress.php"
+        params: "(none)"
+        return: "void"
+        hooks_registered:
+          - hook: "admin_menu"
+            callback: "array( $this, 'add_admin_menu' )"
+            priority: 10
+          - hook: "admin_init"
+            callback: "array( $this, 'register_settings' )"
+            priority: 10
+          - hook: "admin_enqueue_scripts"
+            callback: "array( $this, 'enqueue_admin_assets' )"
+            priority: 10
+        phpdoc: |
+          /**
+           * Register WordPress hooks for settings.
+           *
+           * @return void
+           */
+
+      add_admin_menu:
+        visibility: "public"
+        purpose: "Add ConsensusPress menu to WP admin sidebar"
+        params: "(none)"
+        return: "void"
+        logic_steps:
+          - "1. add_menu_page(): 'ConsensusPress', 'ConsensusPress', 'manage_options', 'consensuspress', callback=render_settings_page, icon='dashicons-chart-area', position=30"
+        phpdoc: |
+          /**
+           * Add admin menu page.
+           *
+           * @return void
+           */
+
+      register_settings:
+        visibility: "public"
+        purpose: "Register all plugin settings with WordPress Settings API"
+        params: "(none)"
+        return: "void"
+        logic_steps:
+          - "1. register_setting( 'consensuspress_settings', 'consensuspress_api_key', sanitize=sanitize_text_field )"
+          - "2. register_setting( 'consensuspress_settings', 'consensuspress_default_category', sanitize=absint )"
+          - "3. register_setting( 'consensuspress_settings', 'consensuspress_default_status', sanitize=[$this,'sanitize_post_status'] )"
+          - "4. register_setting( 'consensuspress_settings', 'consensuspress_notification_email', sanitize=sanitize_email )"
+          - "5. add_settings_section( 'consensuspress_api_section', 'API Configuration', callback=null, page=consensuspress )"
+          - "6. add_settings_section( 'consensuspress_defaults_section', 'Default Settings', callback=null, page=consensuspress )"
+          - "7. add_settings_field for each option in appropriate section"
+        phpdoc: |
+          /**
+           * Register plugin settings with WordPress Settings API.
+           *
+           * @return void
+           */
+
+      sanitize_post_status:
+        visibility: "public"
+        purpose: "Sanitize callback for default_status — whitelist only"
+        params:
+          value: { type: "string" }
+        return: "string"
+        logic: |
+          $allowed = array( 'draft', 'pending' );
+          return in_array( $value, $allowed, true ) ? $value : 'draft';
+        phpdoc: |
+          /**
+           * Sanitize post status to allowed values only.
+           *
+           * @param string $value Input value.
+           * @return string Sanitized value ('draft' or 'pending').
+           */
+
+      enqueue_admin_assets:
+        visibility: "public"
+        purpose: "Load CSS/JS only on ConsensusPress admin pages"
+        params:
+          hook_suffix: { type: "string", description: "WordPress admin page hook" }
+        return: "void"
+        logic_steps:
+          - "1. Check $hook_suffix === 'toplevel_page_consensuspress' — bail if not"
+          - "2. wp_enqueue_style( 'consensuspress-admin', CONSENSUSPRESS_PLUGIN_URL . 'admin/css/consensuspress-admin.css', array(), CONSENSUSPRESS_VERSION )"
+          - "3. wp_enqueue_script( 'consensuspress-admin', CONSENSUSPRESS_PLUGIN_URL . 'admin/js/consensuspress-admin.js', array('jquery'), CONSENSUSPRESS_VERSION, true )"
+          - "4. wp_localize_script( 'consensuspress-admin', 'consensuspress_ajax', array( 'ajax_url' => admin_url('admin-ajax.php'), 'nonce' => wp_create_nonce('consensuspress_test_connection') ) )"
+        phpdoc: |
+          /**
+           * Enqueue admin CSS and JS on ConsensusPress pages only.
+           *
+           * @param string $hook_suffix Current admin page hook suffix.
+           * @return void
+           */
+
+      render_settings_page:
+        visibility: "public"
+        purpose: "Render settings page — loads template file"
+        params: "(none)"
+        return: "void"
+        logic: |
+          if ( ! current_user_can( 'manage_options' ) ) {
+              return;
+          }
+          include CONSENSUSPRESS_PLUGIN_DIR . 'admin/views/settings.php';
+        phpdoc: |
+          /**
+           * Render the settings page.
+           *
+           * @return void
+           */
+
+      render_api_key_field:
+        visibility: "public"
+        purpose: "Render API key input field"
+        params: "(none)"
+        return: "void"
+        output: |
+          <input type="password" id="consensuspress_api_key"
+                 name="consensuspress_api_key"
+                 value="<?php echo esc_attr( get_option( 'consensuspress_api_key', '' ) ); ?>"
+                 class="regular-text" />
+          <button type="button" id="consensuspress-test-connection"
+                  class="button button-secondary">
+              <?php esc_html_e( 'Test Connection', 'consensuspress' ); ?>
+          </button>
+          <span id="consensuspress-connection-result"></span>
+
+      render_default_category_field:
+        visibility: "public"
+        purpose: "Render category dropdown"
+        params: "(none)"
+        return: "void"
+        logic: "wp_dropdown_categories() with selected=get_option('consensuspress_default_category',0), show_option_none='— Select —', name='consensuspress_default_category'"
+
+      render_default_status_field:
+        visibility: "public"
+        purpose: "Render post status dropdown"
+        params: "(none)"
+        return: "void"
+        output: "Select element with options: draft, pending"
+
+      render_notification_email_field:
+        visibility: "public"
+        purpose: "Render notification email input"
+        params: "(none)"
+        return: "void"
+        output: "Input type=email with get_option value"
+
+  # ---------------------------------------------------------------------------
+  # FUNCTIONS (in consensuspress.php — not in a class)
+  # ---------------------------------------------------------------------------
+  plugin_functions:
+
+    consensuspress_activate:
+      purpose: "Plugin activation hook"
+      params: "(none)"
+      return: "void"
+      logic_steps:
+        - "1. Check PHP version >= CONSENSUSPRESS_MIN_PHP"
+        - "2. Check WP version >= CONSENSUSPRESS_MIN_WP"
+        - "3. If either fails: deactivate_plugins(plugin_basename(__FILE__)), wp_die with message"
+        - "4. Set default options if not already set (add_option for each)"
+        - "5. flush_rewrite_rules() (for future REST endpoints)"
+      phpdoc: |
+        /**
+         * Plugin activation callback.
+         *
+         * Checks minimum requirements and sets default options.
+         *
+         * @return void
+         */
+
+    consensuspress_deactivate:
+      purpose: "Plugin deactivation hook"
+      params: "(none)"
+      return: "void"
+      logic_steps:
+        - "1. flush_rewrite_rules()"
+        - "2. Do NOT delete options (user may reactivate)"
+      phpdoc: |
+        /**
+         * Plugin deactivation callback.
+         *
+         * Cleans up rewrite rules. Does NOT delete options.
+         *
+         * @return void
+         */
+
+    consensuspress_uninstall:
+      purpose: "Plugin uninstall hook (static — in uninstall.php or register_uninstall_hook)"
+      note: "Create separate uninstall.php file for this"
+      params: "(none)"
+      return: "void"
+      logic_steps:
+        - "1. Check defined('WP_UNINSTALL_PLUGIN') — bail if not"
+        - "2. delete_option() for ALL consensuspress_* options"
+        - "3. Delete post meta: _consensuspress_score, _consensuspress_mode, _consensuspress_champion_provider, _consensuspress_risk_level, _consensuspress_query_id"
+      phpdoc: |
+        /**
+         * Clean up all plugin data on uninstall.
+         *
+         * @return void
+         */
+
+    consensuspress_init:
+      purpose: "Main initialisation — runs on 'plugins_loaded' hook"
+      params: "(none)"
+      return: "void"
+      logic_steps:
+        - "1. require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-api.php'"
+        - "2. require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-settings.php'"
+        - "3. Instantiate ConsensusPress_Settings and call ->init()"
+      hook: "plugins_loaded"
+      priority: 10
+
+    consensuspress_ajax_test_connection:
+      purpose: "AJAX handler for Test Connection button"
+      params: "(none)"
+      return: "void (sends JSON response via wp_send_json_success/error)"
+      logic_steps:
+        - "1. check_ajax_referer( 'consensuspress_test_connection', 'nonce' )"
+        - "2. if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error"
+        - "3. $api_key = get_option( 'consensuspress_api_key', '' )"
+        - "4. if empty, wp_send_json_error( array('message'=>'No API key configured') )"
+        - "5. $api = new ConsensusPress_API( $api_key )"
+        - "6. $result = $api->test_connection()"
+        - "7. if success, wp_send_json_success( $result )"
+        - "8. else wp_send_json_error( $result )"
+      hooks:
+        - "wp_ajax_consensuspress_test_connection"
+
+  # ---------------------------------------------------------------------------
+  # POST META KEYS (defined here for cross-sprint reference)
+  # ---------------------------------------------------------------------------
+  post_meta_keys:
+    _consensuspress_score:
+      type: "float"
+      description: "Consensus score (0.0-100.0)"
+    _consensuspress_mode:
+      type: "string"
+      description: "'create' or 'rescue'"
+    _consensuspress_champion_provider:
+      type: "string"
+      description: "Provider name that won champion selection"
+    _consensuspress_risk_level:
+      type: "string"
+      description: "Oracle risk level: low/medium/high/critical"
+    _consensuspress_query_id:
+      type: "string"
+      description: "Unique query ID from API response"
+    note: "These are NOT used in Sprint 1. Listed here for C-C awareness. DO NOT implement storage in Sprint 1."
+
+  # ---------------------------------------------------------------------------
+  # RANK MATH META KEYS (verified 2026-02-26 via web search)
+  # ---------------------------------------------------------------------------
+  rank_math_meta_keys:
+    rank_math_title:
+      type: "string"
+      description: "SEO title"
+    rank_math_description:
+      type: "string"
+      description: "Meta description"
+    rank_math_focus_keyword:
+      type: "string"
+      description: "Primary focus keyword"
+    rank_math_canonical_url:
+      type: "string"
+      description: "Canonical URL"
+    rank_math_facebook_title:
+      type: "string"
+      description: "OpenGraph title"
+    rank_math_facebook_description:
+      type: "string"
+      description: "OpenGraph description"
+    rank_math_facebook_image:
+      type: "string"
+      description: "OpenGraph image URL"
+    rank_math_twitter_title:
+      type: "string"
+      description: "Twitter card title"
+    rank_math_twitter_description:
+      type: "string"
+      description: "Twitter card description"
+    note: "These are NOT used in Sprint 1. Listed for Sprint 3 reference. DO NOT implement in Sprint 1."
+
+# =============================================================================
+# D2: DOUBLE-ENTRY VERIFICATION MATRIX
+# =============================================================================
+# Every OUTPUT has a matching INPUT consumer.
+# Every INPUT has a matching OUTPUT producer.
+# Orphans = bugs.
+# =============================================================================
+d2_verification_matrix:
+
+  contracts:
+    # --- Constants ---
+    - output: "consensuspress.php DEFINES CONSENSUSPRESS_VERSION"
+      input: "class-consensuspress-settings.php READS CONSENSUSPRESS_VERSION in enqueue_admin_assets()"
+    - output: "consensuspress.php DEFINES CONSENSUSPRESS_PLUGIN_DIR"
+      input: "class-consensuspress-settings.php READS CONSENSUSPRESS_PLUGIN_DIR in render_settings_page()"
+      input2: "consensuspress.php READS CONSENSUSPRESS_PLUGIN_DIR in consensuspress_init()"
+    - output: "consensuspress.php DEFINES CONSENSUSPRESS_PLUGIN_URL"
+      input: "class-consensuspress-settings.php READS CONSENSUSPRESS_PLUGIN_URL in enqueue_admin_assets()"
+    - output: "consensuspress.php DEFINES CONSENSUSPRESS_API_ENDPOINT"
+      input: "class-consensuspress-api.php READS CONSENSUSPRESS_API_ENDPOINT in query()"
+    - output: "consensuspress.php DEFINES CONSENSUSPRESS_API_TIMEOUT"
+      input: "class-consensuspress-api.php READS CONSENSUSPRESS_API_TIMEOUT in query()"
+
+    # --- Options ---
+    - output: "consensuspress_activate() WRITES consensuspress_api_key default"
+      input: "ConsensusPress_Settings::render_api_key_field() READS consensuspress_api_key"
+      input2: "consensuspress_ajax_test_connection() READS consensuspress_api_key"
+    - output: "Settings API WRITES consensuspress_api_key on form submit"
+      input: "ConsensusPress_API constructor RECEIVES api_key param (passed from get_option)"
+    - output: "consensuspress_activate() WRITES consensuspress_default_category default"
+      input: "ConsensusPress_Settings::render_default_category_field() READS it"
+    - output: "consensuspress_activate() WRITES consensuspress_default_status default"
+      input: "ConsensusPress_Settings::render_default_status_field() READS it"
+
+    # --- Transport Interface ---
+    - output: "ConsensusPress_Transport_Interface DEFINES post() contract"
+      input: "ConsensusPress_WP_Transport IMPLEMENTS post()"
+      input2: "ConsensusPress_Mock_Transport IMPLEMENTS post() (in tests)"
+    - output: "ConsensusPress_WP_Transport::post() RETURNS array|WP_Error"
+      input: "ConsensusPress_API::query() CONSUMES return via $this->transport->post()"
+
+    # --- AJAX ---
+    - output: "wp_localize_script OUTPUTS consensuspress_ajax.nonce"
+      input: "consensuspress-admin.js READS consensuspress_ajax.nonce"
+    - output: "wp_localize_script OUTPUTS consensuspress_ajax.ajax_url"
+      input: "consensuspress-admin.js READS consensuspress_ajax.ajax_url"
+    - output: "consensuspress_ajax_test_connection OUTPUTS wp_send_json_success/error"
+      input: "consensuspress-admin.js CONSUMES JSON response in AJAX callback"
+
+    # --- File Includes ---
+    - output: "consensuspress_init() REQUIRES class-consensuspress-api.php"
+      input: "ConsensusPress_API class DEFINED in class-consensuspress-api.php"
+    - output: "consensuspress_init() REQUIRES class-consensuspress-settings.php"
+      input: "ConsensusPress_Settings class DEFINED in class-consensuspress-settings.php"
+
+    # --- Settings Template ---
+    - output: "ConsensusPress_Settings::render_settings_page() INCLUDES admin/views/settings.php"
+      input: "admin/views/settings.php EXISTS and renders form"
+    - output: "admin/views/settings.php CALLS settings_fields('consensuspress_settings')"
+      input: "ConsensusPress_Settings::register_settings() REGISTERED group 'consensuspress_settings'"
+    - output: "admin/views/settings.php CALLS do_settings_sections('consensuspress')"
+      input: "ConsensusPress_Settings::register_settings() REGISTERED sections on page 'consensuspress'"
+
+  balance_check: "18 outputs, 18+ inputs. All matched. No orphans."
+
+# =============================================================================
+# D3: API CONTRACTS
+# =============================================================================
+d3_api_contracts:
+
+  seekrates_api:
+    endpoint: "POST https://app.seekrates-ai.com/api/v1/consensus"
+    content_type: "application/json"
+    auth_header: "Authorization: Bearer {api_key}"
+    timeout: "120 seconds (CONSENSUSPRESS_API_TIMEOUT)"
+
+    request_body:
+      query: { type: "string", required: true, min_length: 10, max_length: 50000 }
+      mode: { type: "string", required: true, enum: ["create", "rescue"] }
+      context: { type: "string", required: false, max_length: 2000, default: "" }
+      output_format: { type: "string", required: false, default: "json" }
+
+    wp_remote_post_args: |
+      array(
+          'timeout'  => CONSENSUSPRESS_API_TIMEOUT,
+          'headers'  => array(
+              'Content-Type'  => 'application/json',
+              'Authorization' => 'Bearer ' . $this->api_key,
+          ),
+          'body'     => wp_json_encode( array(
+              'query'         => $query,
+              'mode'          => $mode,
+              'context'       => $context,
+              'output_format' => 'json',
+          ) ),
+      )
+
+    response_handling: |
+      $response    = $this->transport->post( CONSENSUSPRESS_API_ENDPOINT, $args );
+      
+      if ( is_wp_error( $response ) ) {
+          return array(
+              'success'     => false,
+              'data'        => null,
+              'error'       => array(
+                  'code'    => 'connection_error',
+                  'message' => $response->get_error_message(),
+              ),
+              'http_status' => 0,
+          );
+      }
+      
+      $http_status = wp_remote_retrieve_response_code( $response );
+      $body        = wp_remote_retrieve_body( $response );
+      $data        = json_decode( $body, true );
+      
+      if ( null === $data ) {
+          return array(
+              'success'     => false,
+              'data'        => null,
+              'error'       => array(
+                  'code'    => 'invalid_response',
+                  'message' => 'Invalid JSON response from Seekrates API.',
+              ),
+              'http_status' => $http_status,
+          );
+      }
+      
+      if ( 200 === $http_status ) {
+          return array(
+              'success'     => true,
+              'data'        => $data,
+              'error'       => null,
+              'http_status' => 200,
+          );
+      }
+      
+      return array(
+          'success'     => false,
+          'data'        => null,
+          'error'       => array(
+              'code'    => isset( $data['error'] ) ? $data['error'] : 'unknown_error',
+              'message' => isset( $data['message'] ) ? $data['message'] : 'Unknown error.',
+          ),
+          'http_status' => $http_status,
+      );
+
+  wordpress_settings_api:
+    option_group: "consensuspress_settings"
+    page: "consensuspress"
+    sections:
+      - id: "consensuspress_api_section"
+        title: "API Configuration"
+        fields:
+          - id: "consensuspress_api_key"
+            title: "API Key"
+            callback: "render_api_key_field"
+          - id: "consensuspress_notification_email"
+            title: "Notification Email"
+            callback: "render_notification_email_field"
+      - id: "consensuspress_defaults_section"
+        title: "Default Settings"
+        fields:
+          - id: "consensuspress_default_category"
+            title: "Default Category"
+            callback: "render_default_category_field"
+          - id: "consensuspress_default_status"
+            title: "Default Post Status"
+            callback: "render_default_status_field"
+
+  ajax_contract:
+    action: "consensuspress_test_connection"
+    method: "POST"
+    nonce_action: "consensuspress_test_connection"
+    nonce_field: "nonce"
+    capability: "manage_options"
+    success_response: "{ success: true, data: { success: true, message: 'Connected' } }"
+    error_responses:
+      no_key: "{ success: false, data: { message: 'No API key configured' } }"
+      invalid_key: "{ success: false, data: { message: 'Invalid API key' } }"
+      connection_fail: "{ success: false, data: { message: '<wp_error_message>' } }"
+
+# =============================================================================
+# D4: TEST SCENARIOS
+# =============================================================================
+d4_test_scenarios:
+
+  test_api_client:
+    file: "tests/test-api-client.php"
+    class: "Test_ConsensusPress_API"
+    extends: "WP_UnitTestCase (or PHPUnit\\Framework\\TestCase if no WP test suite)"
+
+    scenarios:
+      - id: "API-01"
+        name: "test_successful_create_query"
+        description: "Create mode returns success with all expected keys"
+        setup: "Mock transport with fixture_create_success (HTTP 200)"
+        assertion: |
+          $result = $api->query( 'Test topic for consensus', 'create' );
+          $this->assertTrue( $result['success'] );
+          $this->assertIsArray( $result['data'] );
+          $this->assertArrayHasKey( 'consensus_score', $result['data'] );
+          $this->assertArrayHasKey( 'champion', $result['data'] );
+          $this->assertArrayHasKey( 'synthesis', $result['data'] );
+          $this->assertEquals( 200, $result['http_status'] );
+
+      - id: "API-02"
+        name: "test_unauthorized_returns_error"
+        description: "Invalid API key returns structured error"
+        setup: "Mock transport with fixture_auth_failure (HTTP 401)"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'unauthorized', $result['error']['code'] );
+          $this->assertEquals( 401, $result['http_status'] );
+
+      - id: "API-03"
+        name: "test_usage_exceeded_returns_error"
+        description: "Usage limit hit returns structured error"
+        setup: "Mock transport with fixture_usage_exceeded (HTTP 402)"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'usage_exceeded', $result['error']['code'] );
+          $this->assertEquals( 402, $result['http_status'] );
+
+      - id: "API-04"
+        name: "test_connection_error_handled"
+        description: "WP_Error from transport is caught gracefully"
+        setup: "Mock transport returns WP_Error('http_request_failed','cURL error')"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'connection_error', $result['error']['code'] );
+          $this->assertEquals( 0, $result['http_status'] );
+
+      - id: "API-05"
+        name: "test_invalid_json_response"
+        description: "Non-JSON response body returns invalid_response error"
+        setup: "Mock transport returns HTTP 200 with body='<html>not json</html>'"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'invalid_response', $result['error']['code'] );
+
+      - id: "API-06"
+        name: "test_server_error"
+        description: "HTTP 500 returns structured error"
+        setup: "Mock transport with fixture_server_error (HTTP 500)"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'server_error', $result['error']['code'] );
+          $this->assertEquals( 500, $result['http_status'] );
+
+      - id: "API-07"
+        name: "test_rate_limited"
+        description: "HTTP 429 returns rate_limited error"
+        setup: "Mock transport with fixture_rate_limited (HTTP 429)"
+        assertion: |
+          $result = $api->query( 'Test topic', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'rate_limited', $result['error']['code'] );
+
+      - id: "API-08"
+        name: "test_short_query_rejected"
+        description: "Query under 10 chars is rejected locally before API call"
+        setup: "No mock needed — validation is client-side"
+        assertion: |
+          $result = $api->query( 'short', 'create' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'bad_request', $result['error']['code'] );
+          $this->assertStringContainsString( '10 characters', $result['error']['message'] );
+
+      - id: "API-09"
+        name: "test_invalid_mode_rejected"
+        description: "Mode not in ['create','rescue'] rejected locally"
+        setup: "No mock needed — validation is client-side"
+        assertion: |
+          $result = $api->query( 'Valid length query text', 'invalid_mode' );
+          $this->assertFalse( $result['success'] );
+          $this->assertEquals( 'bad_request', $result['error']['code'] );
+
+      - id: "API-10"
+        name: "test_connection_success"
+        description: "test_connection() returns success when API responds 200"
+        setup: "Mock transport with fixture_create_success (HTTP 200)"
+        assertion: |
+          $result = $api->test_connection();
+          $this->assertTrue( $result['success'] );
+          $this->assertEquals( 'Connected', $result['message'] );
+
+      - id: "API-11"
+        name: "test_connection_invalid_key"
+        description: "test_connection() returns failure on 401"
+        setup: "Mock transport with fixture_auth_failure (HTTP 401)"
+        assertion: |
+          $result = $api->test_connection();
+          $this->assertFalse( $result['success'] );
+          $this->assertStringContainsString( 'Invalid', $result['message'] );
+
+      - id: "API-12"
+        name: "test_get_usage"
+        description: "get_usage() reads from wp_options correctly"
+        setup: "update_option('consensuspress_usage_count', 7); update_option('consensuspress_usage_limit', 10); update_option('consensuspress_tier', 'starter')"
+        assertion: |
+          $usage = $api->get_usage();
+          $this->assertEquals( 7, $usage['used'] );
+          $this->assertEquals( 10, $usage['limit'] );
+          $this->assertEquals( 'starter', $usage['tier'] );
+
+      - id: "API-13"
+        name: "test_partial_refusal_handled"
+        description: "Partial refusal response is parsed correctly (BUG-105-01)"
+        setup: "Mock transport with fixture_partial_refusal (HTTP 200)"
+        assertion: |
+          $result = $api->query( 'AI legal personhood by 2028', 'create' );
+          $this->assertTrue( $result['success'] );
+          $this->assertFalse( $result['data']['champion']['is_refusal'] );
+          $this->assertEquals( 'openai', $result['data']['champion']['provider'] );
+
+  test_settings:
+    file: "tests/test-settings.php"
+    class: "Test_ConsensusPress_Settings"
+    note: "These test option registration and sanitization. Full WP integration tests need WP test suite."
+
+    scenarios:
+      - id: "SET-01"
+        name: "test_sanitize_post_status_valid"
+        description: "Valid status 'draft' passes through"
+        assertion: |
+          $settings = new ConsensusPress_Settings();
+          $this->assertEquals( 'draft', $settings->sanitize_post_status( 'draft' ) );
+          $this->assertEquals( 'pending', $settings->sanitize_post_status( 'pending' ) );
+
+      - id: "SET-02"
+        name: "test_sanitize_post_status_invalid"
+        description: "Invalid status defaults to 'draft'"
+        assertion: |
+          $settings = new ConsensusPress_Settings();
+          $this->assertEquals( 'draft', $settings->sanitize_post_status( 'publish' ) );
+          $this->assertEquals( 'draft', $settings->sanitize_post_status( 'malicious<script>' ) );
+          $this->assertEquals( 'draft', $settings->sanitize_post_status( '' ) );
+
+      - id: "SET-03"
+        name: "test_default_options_set_on_activation"
+        description: "Activation sets all default option values"
+        assertion: |
+          consensuspress_activate();
+          $this->assertEquals( '', get_option( 'consensuspress_api_key' ) );
+          $this->assertEquals( 0, get_option( 'consensuspress_default_category' ) );
+          $this->assertEquals( 'draft', get_option( 'consensuspress_default_status' ) );
+          $this->assertEquals( 3, get_option( 'consensuspress_usage_limit' ) );
+          $this->assertEquals( 'free', get_option( 'consensuspress_tier' ) );
+
+# =============================================================================
+# D5: DIRECTORY MAP
+# =============================================================================
+d5_directory_map:
+  consensuspress/:
+    consensuspress.php: "Main plugin file (header, constants, hooks, activation)"
+    uninstall.php: "Uninstall cleanup (delete all options + post meta)"
+    readme.txt: "WordPress.org listing"
+    includes/:
+      class-consensuspress-api.php: "Transport interface + WP transport + API client class"
+      class-consensuspress-settings.php: "Settings class"
+    admin/:
+      css/:
+        consensuspress-admin.css: "Scaffold styles (layout only — design kit later)"
+      js/:
+        consensuspress-admin.js: "Test Connection AJAX handler"
+      views/:
+        settings.php: "Settings page template"
+    assets/:
+      images/:
+        ".gitkeep": "Placeholder for icon/banner (Sprint 6)"
+    languages/:
+      ".gitkeep": "Placeholder for .pot file (Sprint 6)"
+    tests/:
+      bootstrap.php: "PHPUnit bootstrap (load WP stubs or WP test suite)"
+      class-consensuspress-mock-transport.php: "Mock transport implementing interface"
+      test-api-client.php: "API client test class (13 scenarios)"
+      test-settings.php: "Settings test class (3 scenarios)"
+
+  total_files: 14
+  note: ".gitkeep files are 0 bytes — just ensure directories exist"
+
+# =============================================================================
+# D6: IMPORT SPECIFICATION
+# =============================================================================
+d6_import_specification:
+
+  consensuspress_php:
+    file: "consensuspress.php"
+    requires:
+      - statement: "require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-api.php';"
+        location: "inside consensuspress_init() function"
+        rationale: "Loaded on plugins_loaded, not on every page load"
+      - statement: "require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-settings.php';"
+        location: "inside consensuspress_init() function"
+        rationale: "Settings class needed for admin hooks"
+    hooks:
+      - statement: "register_activation_hook( __FILE__, 'consensuspress_activate' );"
+        priority: "n/a (WordPress core manages activation)"
+      - statement: "register_deactivation_hook( __FILE__, 'consensuspress_deactivate' );"
+        priority: "n/a"
+      - statement: "add_action( 'plugins_loaded', 'consensuspress_init' );"
+        priority: 10
+      - statement: "add_action( 'wp_ajax_consensuspress_test_connection', 'consensuspress_ajax_test_connection' );"
+        priority: 10
+    no_autoloader: |
+      Sprint 1 has only 2 class files — require_once is appropriate.
+      PSR-4 autoloader added in Sprint 2 when class count grows.
+
+  class_consensuspress_api_php:
+    file: "includes/class-consensuspress-api.php"
+    contains:
+      - "ConsensusPress_Transport_Interface (interface)"
+      - "ConsensusPress_WP_Transport (class)"
+      - "ConsensusPress_API (class)"
+    requires: "None — all dependencies are WordPress core functions"
+    consumed_by: "consensuspress.php via require_once"
+
+  class_consensuspress_settings_php:
+    file: "includes/class-consensuspress-settings.php"
+    contains:
+      - "ConsensusPress_Settings (class)"
+    requires: "None — all dependencies are WordPress core functions"
+    consumed_by: "consensuspress.php via require_once"
+
+  admin_views_settings_php:
+    file: "admin/views/settings.php"
+    included_by: "ConsensusPress_Settings::render_settings_page()"
+    expects_available:
+      - "WordPress settings functions (settings_fields, do_settings_sections, submit_button)"
+      - "CONSENSUSPRESS_VERSION constant"
+    no_direct_access: |
+      First line: if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+  admin_js_consensuspress_admin_js:
+    file: "admin/js/consensuspress-admin.js"
+    enqueued_by: "ConsensusPress_Settings::enqueue_admin_assets()"
+    depends: "['jquery']"
+    localized_data:
+      object_name: "consensuspress_ajax"
+      properties:
+        ajax_url: "admin_url('admin-ajax.php')"
+        nonce: "wp_create_nonce('consensuspress_test_connection')"
+
+  admin_css_consensuspress_admin_css:
+    file: "admin/css/consensuspress-admin.css"
+    enqueued_by: "ConsensusPress_Settings::enqueue_admin_assets()"
+    depends: "array() (no dependencies)"
+
+  tests_bootstrap_php:
+    file: "tests/bootstrap.php"
+    requires:
+      - "class-consensuspress-mock-transport.php"
+      - "../includes/class-consensuspress-api.php"
+      - "../includes/class-consensuspress-settings.php"
+    note: |
+      If WP test suite available, load it. Otherwise, define stub functions
+      for get_option, update_option, add_option, wp_remote_retrieve_response_code,
+      wp_remote_retrieve_body, is_wp_error, wp_json_encode.
+
+  tests_mock_transport:
+    file: "tests/class-consensuspress-mock-transport.php"
+    contains: "ConsensusPress_Mock_Transport implements ConsensusPress_Transport_Interface"
+    consumed_by: "test-api-client.php"
+
+# =============================================================================
+# D7: TEST INFRASTRUCTURE
+# =============================================================================
+d7_test_infrastructure:
+
+  bootstrap:
+    file: "tests/bootstrap.php"
+    content_spec: |
+      <?php
+      /**
+       * PHPUnit bootstrap for ConsensusPress tests.
+       *
+       * @package ConsensusPress
+       */
+      
+      // Define ABSPATH if not in WP test environment.
+      if ( ! defined( 'ABSPATH' ) ) {
+          define( 'ABSPATH', '/tmp/wordpress/' );
+      }
+      
+      // Stub WordPress functions for standalone testing.
+      if ( ! function_exists( 'get_option' ) ) {
+          // Simulated options store.
+          global $consensuspress_test_options;
+          $consensuspress_test_options = array();
+          
+          function get_option( $key, $default = false ) {
+              global $consensuspress_test_options;
+              return isset( $consensuspress_test_options[ $key ] )
+                  ? $consensuspress_test_options[ $key ]
+                  : $default;
+          }
+          
+          function update_option( $key, $value ) {
+              global $consensuspress_test_options;
+              $consensuspress_test_options[ $key ] = $value;
+              return true;
+          }
+          
+          function add_option( $key, $value = '' ) {
+              global $consensuspress_test_options;
+              if ( ! isset( $consensuspress_test_options[ $key ] ) ) {
+                  $consensuspress_test_options[ $key ] = $value;
+              }
+              return true;
+          }
+          
+          function delete_option( $key ) {
+              global $consensuspress_test_options;
+              unset( $consensuspress_test_options[ $key ] );
+              return true;
+          }
+          
+          function wp_json_encode( $data ) {
+              return json_encode( $data );
+          }
+          
+          function wp_remote_retrieve_response_code( $response ) {
+              return isset( $response['response']['code'] )
+                  ? $response['response']['code']
+                  : 0;
+          }
+          
+          function wp_remote_retrieve_body( $response ) {
+              return isset( $response['body'] ) ? $response['body'] : '';
+          }
+          
+          function is_wp_error( $thing ) {
+              return $thing instanceof WP_Error;
+          }
+          
+          function sanitize_text_field( $str ) {
+              return trim( strip_tags( $str ) );
+          }
+          
+          function sanitize_email( $email ) {
+              return filter_var( $email, FILTER_SANITIZE_EMAIL );
+          }
+          
+          function absint( $val ) {
+              return abs( (int) $val );
+          }
+          
+          /**
+           * Minimal WP_Error stub for testing.
+           */
+          class WP_Error {
+              private $code;
+              private $message;
+              
+              public function __construct( $code = '', $message = '' ) {
+                  $this->code    = $code;
+                  $this->message = $message;
+              }
+              
+              public function get_error_code() {
+                  return $this->code;
+              }
+              
+              public function get_error_message() {
+                  return $this->message;
+              }
+          }
+      }
+      
+      // Define plugin constants.
+      if ( ! defined( 'CONSENSUSPRESS_VERSION' ) ) {
+          define( 'CONSENSUSPRESS_VERSION', '1.0.0' );
+      }
+      if ( ! defined( 'CONSENSUSPRESS_API_ENDPOINT' ) ) {
+          define( 'CONSENSUSPRESS_API_ENDPOINT', 'https://app.seekrates-ai.com/api/v1/consensus' );
+      }
+      if ( ! defined( 'CONSENSUSPRESS_API_TIMEOUT' ) ) {
+          define( 'CONSENSUSPRESS_API_TIMEOUT', 120 );
+      }
+      
+      // Load plugin files.
+      require_once __DIR__ . '/class-consensuspress-mock-transport.php';
+      require_once __DIR__ . '/../includes/class-consensuspress-api.php';
+      require_once __DIR__ . '/../includes/class-consensuspress-settings.php';
+
+  mock_transport:
+    file: "tests/class-consensuspress-mock-transport.php"
+    content_spec: |
+      <?php
+      /**
+       * Mock HTTP transport for testing.
+       *
+       * @package ConsensusPress
+       */
+      
+      /**
+       * Mock transport that returns predetermined responses.
+       * Implements ConsensusPress_Transport_Interface.
+       */
+      class ConsensusPress_Mock_Transport implements ConsensusPress_Transport_Interface {
+      
+          /** @var string JSON response body. */
+          private $response_json;
+      
+          /** @var int HTTP status code. */
+          private $http_status;
+      
+          /** @var bool Whether to return WP_Error instead. */
+          private $simulate_error;
+      
+          /** @var string Error message when simulating error. */
+          private $error_message;
+      
+          /**
+           * Constructor.
+           *
+           * @param string $response_json JSON response body.
+           * @param int    $http_status   HTTP status code (default 200).
+           * @param bool   $simulate_error Return WP_Error instead of response.
+           * @param string $error_message Error message for WP_Error.
+           */
+          public function __construct(
+              string $response_json = '{}',
+              int $http_status = 200,
+              bool $simulate_error = false,
+              string $error_message = 'Connection failed'
+          ) {
+              $this->response_json  = $response_json;
+              $this->http_status    = $http_status;
+              $this->simulate_error = $simulate_error;
+              $this->error_message  = $error_message;
+          }
+      
+          /**
+           * Simulate HTTP POST.
+           *
+           * @param string $url  Endpoint URL.
+           * @param array  $args Request arguments.
+           * @return array|WP_Error Response or error.
+           */
+          public function post( string $url, array $args ) {
+              if ( $this->simulate_error ) {
+                  return new WP_Error( 'http_request_failed', $this->error_message );
+              }
+      
+              return array(
+                  'response' => array(
+                      'code'    => $this->http_status,
+                      'message' => 'OK',
+                  ),
+                  'body'     => $this->response_json,
+              );
+          }
+      }
+
+  fixtures_location: "Defined in consensuspress_mock_api.yaml. C-C copies fixture JSON verbatim into test methods."
+
+  phpunit_config: |
+    File: phpunit.xml (in plugin root)
+    
+    <?xml version="1.0"?>
+    <phpunit
+        bootstrap="tests/bootstrap.php"
+        colors="true"
+        verbose="true"
+        stopOnFailure="false">
+        <testsuites>
+            <testsuite name="ConsensusPress">
+                <directory>tests</directory>
+            </testsuite>
+        </testsuites>
+    </phpunit>
+
+# =============================================================================
+# SEMANTIC VOCABULARY (Sprint 1 subset — from Mock API Spec)
+# =============================================================================
+semantic_vocabulary:
+  query: "Text sent to Seekrates AI. NOT a database query."
+  mode: "'create' or 'rescue'. NOT WordPress post status."
+  transport: "HTTP layer (wp_remote_post or mock). NOT email."
+  api_key: "Seekrates Bearer token. NOT WordPress application password."
+  option: "WordPress wp_options row. NOT a UI dropdown option."
+  success: "Boolean in API return array. NOT HTTP 200 (those correlate but are separate)."
+
+# =============================================================================
+# PLUGIN HEADER (exact text for consensuspress.php)
+# =============================================================================
+plugin_header: |
+  <?php
+  /**
+   * Plugin Name:       ConsensusPress
+   * Plugin URI:        https://consensuspress-ai.com
+   * Description:       AI-Search Resilient Content Infrastructure — powered by 5-model consensus from Seekrates AI.
+   * Version:           1.0.0
+   * Requires at least: 6.2
+   * Requires PHP:      7.4
+   * Author:            Seekrates AI
+   * Author URI:        https://seekrates-ai.com
+   * License:           GPL v2 or later
+   * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+   * Text Domain:       consensuspress
+   * Domain Path:       /languages
+   */
+
+# =============================================================================
+# README.TXT SPEC (WordPress.org format)
+# =============================================================================
+readme_spec:
+  header:
+    plugin_name: "ConsensusPress"
+    contributors: "seekratesai"
+    tags: "ai, seo, content, consensus, llm"
+    requires: "6.2"
+    tested_up_to: "6.7"
+    requires_php: "7.4"
+    stable_tag: "1.0.0"
+    license: "GPLv2 or later"
+    license_uri: "https://www.gnu.org/licenses/gpl-2.0.html"
+  short_description: "AI-Search Resilient Content Infrastructure — generate and rescue blog content validated by 5 independent AI models."
+  sections:
+    - "== Description =="
+    - "== Installation =="
+    - "== Frequently Asked Questions =="
+    - "== Changelog =="
+    - "== Upgrade Notice =="
+  note: "C-C writes standard WordPress.org readme content. Keep descriptions factual. No marketing hyperbole."
+
+# =============================================================================
+# CSS SCAFFOLD SPEC (minimal — design kit comes later)
+# =============================================================================
+css_scaffold:
+  file: "admin/css/consensuspress-admin.css"
+  contents: |
+    /* Layout only — design kit applied later */
+    .consensuspress-wrap { max-width: 800px; padding: 20px 0; }
+    .consensuspress-wrap h1 { margin-bottom: 20px; }
+    .consensuspress-wrap .form-table th { width: 200px; }
+    #consensuspress-test-connection { margin-left: 10px; }
+    #consensuspress-connection-result { margin-left: 10px; font-style: italic; }
+    #consensuspress-connection-result.success { color: #46b450; }
+    #consensuspress-connection-result.error { color: #dc3232; }
+
+# =============================================================================
+# JS SPEC (Test Connection button only)
+# =============================================================================
+js_spec:
+  file: "admin/js/consensuspress-admin.js"
+  logic: |
+    jQuery(document).ready(function($) {
+        $('#consensuspress-test-connection').on('click', function() {
+            var $button = $(this);
+            var $result = $('#consensuspress-connection-result');
+            
+            $button.prop('disabled', true).text('Testing...');
+            $result.text('').removeClass('success error');
+            
+            $.ajax({
+                url: consensuspress_ajax.ajax_url,
+                type: 'POST',
+                data: {
+                    action: 'consensuspress_test_connection',
+                    nonce: consensuspress_ajax.nonce
+                },
+                success: function(response) {
+                    if (response.success) {
+                        $result.text(response.data.message).addClass('success');
+                    } else {
+                        $result.text(response.data.message).addClass('error');
+                    }
+                },
+                error: function() {
+                    $result.text('Request failed').addClass('error');
+                },
+                complete: function() {
+                    $button.prop('disabled', false).text('Test Connection');
+                }
+            });
+        });
+    });
+
+# =============================================================================
+# SETTINGS PAGE TEMPLATE SPEC
+# =============================================================================
+settings_template_spec:
+  file: "admin/views/settings.php"
+  structure: |
+    1. ABSPATH check (security)
+    2. <div class="wrap consensuspress-wrap">
+    3. <h1>ConsensusPress Settings</h1>
+    4. Usage display: "Used X of Y this month (tier)" — read from options
+    5. <form method="post" action="options.php">
+    6.   settings_fields('consensuspress_settings')
+    7.   do_settings_sections('consensuspress')
+    8.   submit_button()
+    9. </form>
+    10. </div>
+  usage_display: |
+    <?php
+    $used  = absint( get_option( 'consensuspress_usage_count', 0 ) );
+    $limit = absint( get_option( 'consensuspress_usage_limit', 3 ) );
+    $tier  = esc_html( get_option( 'consensuspress_tier', 'free' ) );
+    ?>
+    <div class="consensuspress-usage">
+        <p><?php printf( 'Usage: %d of %d this month (%s tier)', $used, $limit, $tier ); ?></p>
+    </div>
+
+# =============================================================================
+# DNA HEADERS (required on ALL files)
+# =============================================================================
+dna_headers:
+  format: |
+    Every PHP file starts with:
+    /**
+     * [Brief description]
+     *
+     * @package    ConsensusPress
+     * @subpackage [Subpackage if applicable]
+     * @since      1.0.0
+     * @author     Seekrates AI
+     * @license    GPL-2.0+
+     */
+    
+    Every JS/CSS file starts with:
+    /**
+     * [Brief description]
+     *
+     * @package ConsensusPress
+     * @since   1.0.0
+     */
+
+# =============================================================================
+# HAL SCAN CHECKLIST (C-C must verify before delivery)
+# =============================================================================
+hal_scan:
+  HAL-001: "No mixed types without validation (all params typed)"
+  HAL-002: "No echo tests (tests must be falsifiable)"
+  HAL-003: "No undefined calls (every function/method exists in D1)"
+  HAL-004: "No TODO/FIXME in delivered code"
+  HAL-005: "No invented imports (no packages that don't exist)"
+  HAL-006: "No missing error handling (every wp_remote_post has is_wp_error check)"
+  HAL-007: "No hardcoded secrets (API key from get_option only)"
+  HAL-008: "No unverified assumptions (all option keys match D1)"
+
+# =============================================================================
+# END OF C-C INSTRUCTIONS — SPRINT 1
+# =============================================================================

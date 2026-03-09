@@ -1,0 +1,575 @@
+# =============================================================================
+# CONSENSUSPRESS RE-ANCHOR — SESSION 08
+# =============================================================================
+# File:     bootstrap/04_consensuspress_04.yaml
+# Project:  ConsensusPress by Seekrates
+# Session:  08
+# Date:     2026-03-03
+# Author:   D-C (Session 08)
+# Status:   Sprint 7 SPEC COMPLETE. B-01-01 cleared by spec. Ready for C-C.
+# Previous: bootstrap/03_consensuspress_03.yaml (Session 06)
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: SESSION IDENTITY
+# =============================================================================
+session:
+  id: 8
+  project: "ConsensusPress"
+  date: "2026-03-03"
+  title: "Architecture Clarification — HAL-008 Resolution + Sprint 7 D1-D7"
+  duration: "~4 hours"
+  type: "D-C"
+  previous_reanchor: "bootstrap/03_consensuspress_03.yaml"
+
+# =============================================================================
+# SECTION 2: SESSION SUMMARY
+# =============================================================================
+session_summary: |
+  Session 08 resolved a fundamental specification assumption failure (HAL-008)
+  that had been dormant since Session 03: the mock_api.yaml assumed the Railway
+  server would return pre-built content_html, SEO metadata, JSON-LD schema, and
+  an Unsplash image URL. The actual generate_expert_panel_response_v4() engine
+  returns raw consensus analysis only. This was discovered by analysing
+  auth_endpoints.py, consensus_engine.py, and seekrates_publisher_src.zip in
+  sequence, revealing that seekrates_publisher was the entire content production
+  pipeline (email_parser → content_formatter → seo_optimizer → wp_publisher).
+  ConsensusPress replaces this entire chain. Sprint 7 was scoped and fully
+  specified (D1-D7, 1,305 lines): Railway gets a thin JSON wrapper endpoint;
+  the plugin post-builder gets a PHP content pipeline (content_formatter.py +
+  seo_optimizer.py ported to PHP). Blocker B-01-01 is cleared by spec.
+
+# =============================================================================
+# SECTION 3: ACHIEVEMENTS
+# =============================================================================
+achievements:
+
+  analysis_completed:
+
+    - id: "A-08-01"
+      description: "auth_endpoints.py analysed — existing consensus_endpoint() structure mapped"
+      status: "COMPLETE"
+      detail: |
+        Confirmed: generate_expert_panel_response_v4() called with providers + tier.
+        Result: ConsensusResult Pydantic model → model_dump() → dict.
+        Auth: user_manager.validate_session(token). T&C gate confirmed at HTTP 200.
+        Tier branching: seeker gets synthesis only; acolyte/oracle/sage get full data.
+
+    - id: "A-08-02"
+      description: "consensus_engine.py analysed — generate_expert_panel_response_v4() return structure fully mapped"
+      status: "COMPLETE"
+      detail: |
+        Returns ConsensusResult Pydantic model (not dict directly).
+        After model_dump():
+          consensus.champion, consensus.champion_score, consensus.convergence_percentage,
+          consensus.consensus_confidence, consensus.consensus_text, consensus.consensus_panel
+          providers[].provider, providers[].answer, providers[].score, providers[].confidence
+          divergence.common_themes, divergence.outliers
+          risk_analysis (null for seeker/acolyte, populated for oracle/sage)
+          query field NOT in model — must be injected by endpoint.
+
+    - id: "A-08-03"
+      description: "seekrates_publisher_src.zip parsed — complete content production pipeline discovered"
+      status: "COMPLETE"
+      detail: |
+        Revealed: seekrates_publisher was email_parser + content_formatter + seo_optimizer +
+        image_handler + wp_publisher — the entire chain from consensus email to WordPress.
+        Key discovery: ALL content production (HTML, SEO metadata, schema) was done by
+        content_formatter.py + seo_optimizer.py — NOT by the Railway server.
+        This resolves the architecture question definitively.
+
+    - id: "A-08-04"
+      description: "seekrates_blog_post_template.html v6.0.0 analysed — Jinja2 template mapped to PHP"
+      status: "COMPLETE"
+      detail: |
+        Template variables mapped to PHP equivalents.
+        Seekrates-specific items identified for removal:
+          Elementor shortcodes [elementor-template id="..."] — STRIP in ConsensusPress
+          eggC() JavaScript — STRIP
+          seekrates-ai.com internal links — REPLACE with home_url()
+        All other template blocks directly replicable in PHP.
+
+    - id: "A-08-05"
+      description: "HAL-008 violation diagnosed and documented — mock_api.yaml v1.0.0 assumption failure"
+      status: "COMPLETE"
+      detail: |
+        mock_api.yaml v1.0.0 (Session 03) assumed server returns:
+          content_html, metadata.focus_keyword, metadata.seo_title,
+          metadata.meta_description, schema_markup.faq, schema_markup.article,
+          featured_image.url
+        None of these exist in the engine output. All are generated by seekrates_publisher.
+        Resolution: Plugin generates all of this in PHP (post-builder content pipeline).
+
+  decisions_made:
+
+    - id: "D-08-03"
+      description: "Synchronous JSON (Option A) selected for Railway endpoint architecture"
+      status: "COMPLETE"
+      detail: "Plugin holds 120s connection. Server processes and returns. No webhook/callback."
+
+    - id: "D-08-04"
+      description: "Auth via user_manager.validate_session() — no new key infrastructure"
+      status: "COMPLETE"
+      detail: "consensuspress_api_key in wp_options IS the session token from user_manager.py"
+
+    - id: "D-08-05"
+      description: "T&C gate handled in plugin — seekrates_ai codebase NOT modified"
+      status: "COMPLETE"
+      detail: |
+        New endpoint inherits T&C gate. Plugin patches class-consensuspress-api.php
+        to catch {"status": "needs_tc_acceptance"} at HTTP 200 (not an error).
+
+    - id: "D-08-06"
+      description: "All content production in PHP plugin — server is thin wrapper only"
+      status: "COMPLETE"
+      detail: |
+        Railway endpoint: calls engine, model_dump(), wraps in {success, data}.
+        Plugin post-builder: generates content_html, SEO metadata, JSON-LD schema.
+        PHP port of content_formatter.py + seo_optimizer.py.
+        Thin-client IP protection principle preserved.
+
+    - id: "D-08-07"
+      description: "Unsplash featured image deferred to Sprint 8"
+      status: "COMPLETE"
+      detail: |
+        Sprint 7 post-builder sets featured_image = empty array.
+        sideload_featured_image() preserved unchanged — called only when URL present.
+        Posts created without featured image; user sets manually for Sprint 7 builds.
+
+    - id: "D-08-08"
+      description: "query field injected into response data by endpoint"
+      status: "COMPLETE"
+      detail: "query not in ConsensusResult Pydantic model. Endpoint adds data['query'] = request.query."
+
+    - id: "D-08-09"
+      description: "points_of_agreement/divergence mapped from divergence.common_themes/outliers"
+      status: "COMPLETE"
+      detail: "Template sections populated from engine divergence dict — no email parser equivalent needed."
+
+  docs_created:
+
+    - id: "DOC-08-01"
+      description: "sprint_7_d1_d7_instructions.yaml v1.0.0"
+      status: "COMPLETE"
+      files:
+        - "docs/sprint_7_d1_d7_instructions.yaml"
+      detail: |
+        1,305 lines. YAML validated. Covers:
+          D0: Preservation contracts — all Sprint 1-5 tests preserved
+          D1: Type contracts — Python Pydantic models + PHP PHPDoc shapes
+          D2: 5 balanced output/input contracts (A1-A3, B1-B5)
+          D3: Format contracts — N/A (no LLM calls)
+          D4: Full function specs — consensuspress_endpoints.py + all new PHP methods
+          D5: Mock API v2.0.0 field mapping + new fixture_create_success JSON
+          D6: File manifest with DNA headers
+          D7: Verification checklist (Railway gates + PHP scanner + test gates)
+
+    - id: "DOC-08-02"
+      description: "bootstrap/04_consensuspress_04.yaml (this document)"
+      status: "COMPLETE"
+      files:
+        - "bootstrap/04_consensuspress_04.yaml"
+
+  blockers_cleared:
+
+    - id: "B-01-01"
+      description: "POST /api/v1/consensus endpoint does not exist on Railway"
+      resolution: |
+        Fully specified in sprint_7_d1_d7_instructions.yaml D4 part_a_railway.
+        C-C can build from spec. No further analysis required.
+      status: "CLEARED BY SPEC — awaiting C-C build"
+
+# =============================================================================
+# SECTION 4: CURRENT STATUS
+# =============================================================================
+current_status:
+
+  plugin:
+    status: "STABLE"
+    version: "1.3.0"
+    detail: |
+      Sprint 5 delivered by C-C (Session 07): ConsensusPress_Usage, quota gates,
+      admin notices. Plugin at v1.4.0 per uploaded class-consensuspress-async.php
+      which already includes Sprint 5 additions (record_usage, handle_quota_exceeded).
+      NOTE: Uploaded files show v1.2.0 DNA headers but Sprint 5 code is present.
+      Actual plugin state may be v1.4.0. Confirm on next session.
+    tests: "55 (estimated — Sprint 5 adds 8 to Sprint 4's 47)"
+    test_status: "Presumed passing — not run this session"
+
+  railway_endpoint:
+    status: "SPEC COMPLETE — NOT YET BUILT"
+    detail: |
+      consensuspress_endpoints.py fully specified in D4.
+      FastAPI route: POST /api/v1/consensus
+      Auth: user_manager.validate_session()
+      Engine call: generate_expert_panel_response_v4()
+      Response: {"success": true, "data": ConsensusResult.model_dump() + query/mode}
+      Awaiting C-C build on Railway.
+
+  post_builder:
+    status: "SPEC COMPLETE — NOT YET UPDATED"
+    version: "1.0.0 → 2.0.0 pending"
+    detail: |
+      class-consensuspress-post-builder.php v1.0.0 still in place.
+      v2.0.0 fully specified: 10 new private methods for PHP content pipeline.
+      Public interface UNCHANGED — callers unaffected.
+      Awaiting C-C build.
+
+  mock_api:
+    status: "SPEC COMPLETE — v2.0.0 not yet written"
+    detail: |
+      consensuspress_mock_api.yaml v1.0.0 has incorrect field names (old assumed fields).
+      v2.0.0 specified in D5 — real engine field paths, new fixture JSON.
+      Awaiting C-C update alongside post-builder work.
+
+  sprints:
+    sprint_1: "COMPLETE — Plugin skeleton, settings, API client"
+    sprint_2: "COMPLETE — Create Mode, Post Builder"
+    sprint_3: "COMPLETE — Async WP-Cron, Meta Box"
+    sprint_4: "COMPLETE — Rescue Mode, Diff Viewer"
+    sprint_5: "COMPLETE — Usage Tracking, Tier Enforcement"
+    sprint_6: "RENAMED → Sprint 8 (WordPress.org packaging)"
+    sprint_7: "SPEC COMPLETE — Railway endpoint + Post-Builder pipeline"
+    sprint_8: "PENDING — WordPress.org packaging (was Sprint 6)"
+
+# =============================================================================
+# SECTION 5: BLOCKERS
+# =============================================================================
+blockers:
+
+  active:
+    - id: "B-08-01"
+      description: "Unsplash featured image fetch deferred from Sprint 7"
+      blocking: "Posts created without featured image"
+      owner: "Deferred by design — Sprint 8 enhancement"
+      since: "2026-03-03"
+      impact: "Low — cosmetic only. User sets featured image manually."
+
+  cleared:
+    - id: "B-01-01"
+      description: "POST /api/v1/consensus endpoint not built on Railway"
+      resolution: "Fully specified in sprint_7_d1_d7_instructions.yaml. Ready for C-C build."
+
+# =============================================================================
+# SECTION 6: DECISIONS
+# =============================================================================
+decisions:
+
+  - id: "D-08-03"
+    decision: "Synchronous JSON (Option A) for Railway endpoint — plugin holds connection open"
+    rationale: "Matches existing WP-Cron + AJAX polling architecture. No callback infrastructure needed."
+    reversible: false
+
+  - id: "D-08-04"
+    decision: "Auth via user_manager.validate_session() — consensuspress_api_key IS the session token"
+    rationale: "No new key management layer. Existing user_manager.py handles validation."
+    reversible: false
+
+  - id: "D-08-05"
+    decision: "T&C gate handled in plugin — seekrates_ai server codebase unchanged"
+    rationale: "Mohan requirement: keep seekrates_ai pristine. Plugin catches needs_tc_acceptance at HTTP 200."
+    reversible: true
+
+  - id: "D-08-06"
+    decision: "All content production (HTML/SEO/schema) in PHP post-builder — server is thin wrapper only"
+    rationale: |
+      Preserves thin-client IP protection principle. Server = intelligence layer.
+      Plugin = WordPress-native delivery. PHP port of content_formatter.py is ~350 lines
+      of deterministic string manipulation — no LLM calls, no external services.
+    reversible: false
+
+  - id: "D-08-07"
+    decision: "Unsplash featured image deferred to Sprint 8"
+    rationale: "Non-blocking. Posts work without featured image. Reduces Sprint 7 scope."
+    reversible: true
+
+  - id: "D-08-08"
+    decision: "query field injected by endpoint into response data dict"
+    rationale: "query not in ConsensusResult Pydantic model. Plugin needs it for focus_keyword extraction."
+    reversible: false
+
+  - id: "D-08-09"
+    decision: "content_formatter.py + seo_optimizer.py ported to PHP — not replicated server-side"
+    rationale: |
+      Server-side port would require new LLM call per request (additional cost + latency).
+      PHP port is pure string manipulation — deterministic, zero cost, zero latency.
+    reversible: false
+
+# =============================================================================
+# SECTION 7: NEXT STEPS
+# =============================================================================
+next_steps:
+
+  p0_immediate:
+
+    - task: "Confirm plugin current state — is it v1.3.0 or v1.4.0?"
+      project: "CONSENSUSPRESS"
+      note: |
+        Uploaded class-consensuspress-async.php has DNA header v1.2.0 but contains
+        Sprint 5 code (record_usage, handle_quota_exceeded). Uploaded consensuspress.php
+        is v1.2.0. Confirm which version is actually deployed before Sprint 7 C-C.
+        Expected answer: v1.4.0 with 55 tests passing.
+
+    - task: "C-C build sprint_7_d1_d7_instructions.yaml Phase 1 — Railway endpoint"
+      project: "CONSENSUSPRESS"
+      note: |
+        Files: src/api/consensuspress_endpoints.py (NEW, ~55 lines)
+               src/server/main.py (2 lines added)
+        Spec: sprint_7_d1_d7_instructions.yaml D4 part_a_railway
+        Test: POST /api/v1/consensus with valid token → {success: true, data: {...}}
+
+    - task: "C-C build sprint_7_d1_d7_instructions.yaml Phase 2 — T&C patch"
+      project: "CONSENSUSPRESS"
+      note: |
+        File: includes/class-consensuspress-api.php (~12 lines)
+        Spec: sprint_7_d1_d7_instructions.yaml D4 part_a api_php_patch
+        Position: AFTER json_decode, BEFORE 401 check
+
+    - task: "C-C build sprint_7_d1_d7_instructions.yaml Phase 3 — Post-Builder v2.0.0"
+      project: "CONSENSUSPRESS"
+      note: |
+        File: includes/class-consensuspress-post-builder.php v2.0.0 (~350 lines)
+        Spec: sprint_7_d1_d7_instructions.yaml D4 part_b_post_builder
+        CRITICAL: create_draft() public signature UNCHANGED. Callers unaffected.
+        All existing Sprint 1-5 tests must still pass.
+
+    - task: "C-C build sprint_7_d1_d7_instructions.yaml Phase 4 — Mock API v2.0.0 + test updates"
+      project: "CONSENSUSPRESS"
+      note: |
+        Files: consensuspress_mock_api.yaml v2.0.0
+               tests/test-post-builder.php (updated assertions)
+               tests/test-api-client.php (new T&C test)
+        Spec: sprint_7_d1_d7_instructions.yaml D5
+
+  p1_this_week:
+
+    - task: "Smoke test Sprint 7 on live WordPress install"
+      project: "CONSENSUSPRESS"
+      note: |
+        Once Railway endpoint live and post-builder v2.0.0 deployed:
+        1. Install plugin on WP 6.7 test site
+        2. Settings → enter real API key → Test Connection
+        3. Create Mode: submit topic → wait → verify draft created
+        4. Inspect draft: content_html, Rank Math meta, schema, categories
+        5. Rescue Mode: select existing post → verify new draft
+        Real API key required — mock transport will not exercise endpoint.
+
+    - task: "Sprint 8 scope confirmation — WordPress.org packaging"
+      project: "CONSENSUSPRESS"
+      note: |
+        Items identified as Sprint 8 scope:
+        - Unsplash featured image (B-08-01)
+        - readme.txt, banner, icon, screenshots
+        - GPL v2+ compliance audit
+        - WordPress.org SVN submission
+        D-C to write Sprint 8 D1-D7 after Sprint 7 C-C confirms all tests pass.
+
+  p2_backlog:
+
+    - task: "Update HLR v1.2.0 → v1.3.0 to reflect Sprint 7 scope"
+      project: "CONSENSUSPRESS"
+      note: |
+        hlr_consensus_plus.yaml currently at v1.2.0 (Session 08 updated).
+        Sprint 7 represents a scope addition (post-builder content pipeline)
+        not in the original build sequence. HLR should document this.
+
+    - task: "Positioning strategy review — ConsensusPress post-builder as differentiator"
+      project: "CONSENSUSPRESS"
+      note: |
+        The PHP content pipeline (GEO/LLMO/AEO optimised HTML from consensus data)
+        is itself a strong differentiator vs. other AI writer plugins.
+        May be worth highlighting in WordPress.org listing and marketing.
+
+# =============================================================================
+# SECTION 8: KEY INSIGHTS
+# =============================================================================
+key_insights:
+
+  - insight: "spec-first analysis prevents architectural drift even across 8 sessions"
+    lesson: |
+      HAL-008 (unverified assumption) was in the spec since Session 03 but
+      did not cause a build failure because mocks shielded the tests.
+      It surfaced only when the real server files were uploaded. The mock_api
+      spec is the contract — it must be verified against real code before C-C
+      touches the implementation. AFD methodology contained the blast radius.
+
+  - insight: "seekrates_publisher was the missing context — always upload related codebases"
+    lesson: |
+      The architecture question (where does content_html come from?) could not
+      be answered from auth_endpoints.py and consensus_engine.py alone.
+      seekrates_publisher_src.zip provided the bridge. When a system has
+      multiple interconnected codebases, all must be reviewed before
+      speccing the integration layer.
+
+  - insight: "PHP port of Python content pipeline is viable and preferable"
+    lesson: |
+      content_formatter.py + seo_optimizer.py are ~1,200 lines of Python.
+      The PHP port is ~350 lines because the WordPress context provides
+      wp_insert_post(), update_post_meta(), and wp_kses_post() which
+      handle the delivery work. The content generation logic itself is
+      deterministic string manipulation — language-agnostic.
+
+  - insight: "Thin-client architecture preserved despite content pipeline move"
+    lesson: |
+      Moving content generation to the plugin does NOT violate the thin-client
+      principle because: (1) the content is derived from the engine's raw output,
+      not generated independently; (2) all 5-LLM consensus intelligence stays
+      on Railway; (3) the plugin is doing WordPress-native formatting work,
+      not AI reasoning. IP protection is intact.
+
+# =============================================================================
+# SECTION 9: SESSION METRICS
+# =============================================================================
+session_metrics:
+  duration: "~4 hours"
+  bugs_fixed: 1              # HAL-008 (unverified assumption in mock_api.yaml v1.0.0)
+  features_delivered: 0      # No code written — spec session
+  decisions_made: 7          # D-08-03 through D-08-09
+  files_created: 2           # sprint_7_d1_d7_instructions.yaml, 04_consensuspress_04.yaml
+  files_modified: 0          # Spec session — no code changes
+  docs_updated: 0
+  blockers_cleared: 1        # B-01-01 cleared by specification
+  blockers_remaining: 1      # B-08-01 (Unsplash deferred)
+  loc_spec_written: 1305     # sprint_7_d1_d7_instructions.yaml
+
+# =============================================================================
+# SECTION 10: SPRINT COMPLETION REGISTER
+# =============================================================================
+sprint_register:
+  sprint_1:
+    status: "COMPLETE"
+    scope: "Plugin skeleton, settings page, API client, test framework"
+    version_delivered: "1.0.0"
+    tests: 20
+
+  sprint_2:
+    status: "COMPLETE"
+    scope: "Create Mode — topic → API → WordPress draft (SEO/schema/image)"
+    version_delivered: "1.1.0"
+    tests: 29
+
+  sprint_3:
+    status: "COMPLETE"
+    scope: "Async WP-Cron, consensus meta box"
+    version_delivered: "1.2.0"
+    tests: 34
+
+  sprint_4:
+    status: "COMPLETE"
+    scope: "Rescue Mode + Diff Viewer"
+    version_delivered: "1.3.0"
+    tests: 47
+
+  sprint_5:
+    status: "COMPLETE"
+    scope: "Usage Tracking + Tier Enforcement"
+    version_delivered: "1.4.0"
+    tests: 55
+
+  sprint_7:
+    status: "SPEC COMPLETE — AWAITING C-C"
+    scope: |
+      Railway JSON endpoint (consensuspress_endpoints.py).
+      Plugin API T&C gate patch.
+      Post-Builder v2.0.0 — PHP content pipeline.
+      Mock API v2.0.0 — field names corrected.
+    spec_file: "docs/sprint_7_d1_d7_instructions.yaml"
+    version_target: "2.0.0"
+    blocker_cleared: "B-01-01"
+
+  sprint_8:
+    status: "PENDING"
+    scope: "WordPress.org packaging, Unsplash Sprint 7 deferral, SVN submission"
+    version_target: "2.1.0"
+
+# =============================================================================
+# SECTION 11: FILE INVENTORY — CURRENT STATE
+# =============================================================================
+file_inventory:
+
+  plugin_root:
+    - "consensuspress.php              # v1.4.0 (Sprint 5)"
+    - "readme.txt"
+    - "uninstall.php"
+
+  includes_current:
+    - "interface-consensuspress-transport.php   # Sprint 1 — unchanged"
+    - "class-consensuspress-api.php             # v1.0.0 → v1.1.0 pending Sprint 7"
+    - "class-consensuspress-settings.php        # Sprint 1 — unchanged"
+    - "class-consensuspress-post-builder.php    # v1.0.0 → v2.0.0 pending Sprint 7"
+    - "class-consensuspress-create.php          # Sprint 2 — unchanged"
+    - "class-consensuspress-async.php           # v1.2.0 (Sprint 5)"
+    - "class-consensuspress-meta-box.php        # Sprint 3 — unchanged"
+    - "class-consensuspress-rescue.php          # Sprint 4"
+    - "class-consensuspress-usage.php           # Sprint 5 NEW"
+
+  includes_sprint_7_changes:
+    - "class-consensuspress-api.php             # v1.1.0 — T&C gate patch"
+    - "class-consensuspress-post-builder.php    # v2.0.0 — PHP content pipeline"
+
+  docs_current:
+    - "docs/sprint_2_d1_d7_instructions.yaml"
+    - "docs/sprint_3_d1_d7_instructions.yaml"
+    - "docs/sprint_4_d1_d7_instructions.yaml"
+    - "docs/sprint_5_d1_d7_instructions.yaml"
+    - "docs/sprint_7_d1_d7_instructions.yaml    # NEW Session 08"
+    - "docs/consensuspress_mock_api.yaml         # v1.0.0 → v2.0.0 pending Sprint 7"
+
+  railway_sprint_7_new:
+    - "src/api/consensuspress_endpoints.py      # NEW — pending C-C build"
+
+  bootstrap:
+    - "bootstrap/01_consensuspress_01.yaml"
+    - "bootstrap/02_consensuspress_02.yaml"
+    - "bootstrap/03_consensuspress_03.yaml"
+    - "bootstrap/04_consensuspress_04.yaml      # THIS FILE"
+
+# =============================================================================
+# SECTION 12: HYDRATION INSTRUCTIONS
+# =============================================================================
+hydration:
+
+  on_next_session:
+    - "Parse bootstrap/04_consensuspress_04.yaml (this file)"
+    - "Parse bootstrap/03_consensuspress_03.yaml for Sprint 4-5 context"
+    - "Confirm plugin version: check consensuspress.php define CONSENSUSPRESS_VERSION"
+    - "Confirm test count: run phpunit and verify 55 tests pass (or check last known state)"
+    - "Load sprint_7_d1_d7_instructions.yaml before issuing C-C instruction"
+    - "Sprint 7 execution order: Phase 1 (Railway) → Phase 2 (T&C patch) → Phase 3 (post-builder) → Phase 4 (mock + tests)"
+
+  key_files:
+    - "bootstrap/04_consensuspress_04.yaml"
+    - "bootstrap/03_consensuspress_03.yaml"
+    - "docs/sprint_7_d1_d7_instructions.yaml"
+    - "docs/consensuspress_mock_api.yaml"
+    - "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+    - "plugin/consensuspress/includes/class-consensuspress-api.php"
+    - "src/api/consensuspress_endpoints.py  (to be created)"
+    - "src/server/main.py  (2 lines to be added)"
+
+  open_questions:
+    - "What is the exact current plugin version — 1.3.0 or 1.4.0? Sprint 5 code visible in uploaded async file but DNA headers show v1.2.0."
+    - "Is test count 47 (Sprint 4) or 55 (Sprint 5)? Need confirmation before Sprint 7 C-C to set regression baseline."
+    - "Who runs the Railway C-C build — Mohan deploys to Railway or C-C writes and Mohan pastes/deploys?"
+    - "Should consensuspress_endpoints.py use the same T&C check as consensus_guest_endpoint (email-based) or consensus_endpoint (session-token-based)? Decision: session-token path (D-08-04) — confirm."
+
+  c_c_activation_notes:
+    - "C-C Sprint 7 command: 'C-C. Sprint 7. Go.'"
+    - "C-C must load sprint_7_d1_d7_instructions.yaml before writing any code"
+    - "Phase 3 (post-builder) is the largest deliverable — ~350 lines PHP"
+    - "Public signature of create_draft() is FROZEN — any change is a regression"
+    - "build_content_html() must contain ZERO Elementor shortcodes and ZERO seekrates-ai.com URLs"
+    - "All existing tests from Sprints 1-5 must pass before delivery"
+
+# =============================================================================
+# SECTION 13: VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-03-03"
+    author: "D-C (Session 08)"
+    changes: "Initial re-anchor — Session 08 HAL-008 resolution + Sprint 7 spec"
+
+# =============================================================================
+# END OF RE-ANCHOR
+# =============================================================================

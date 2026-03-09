@@ -1,0 +1,1007 @@
+# =============================================================================
+# SPRINT 2: CREATE MODE — D1-D7 SPECIFICATION
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Sprint:   2 of 6
+# Author:   D-C (Session 03)
+# Date:     2026-02-28
+# Method:   AFD v1.3.0
+# HLR ref:  Build Sequence Steps 4-5
+# Mock ref: consensuspress_mock_api.yaml (fixtures 1, 3, 4, 5, 6, 8, 10)
+# =============================================================================
+# SCOPE:
+#   User enters topic → plugin calls Seekrates API → WordPress draft created
+#   with content_html, Rank Math SEO fields, FAQ+Article schema, featured
+#   image sideloaded from Unsplash, consensus metadata stored in post_meta.
+#
+# OUT OF SCOPE (future sprints):
+#   - Async/WP-Cron polling (Sprint 3)
+#   - Consensus meta box on edit screen (Sprint 3)
+#   - Rescue mode (Sprint 4)
+#   - Diff viewer (Sprint 4)
+#   - Usage tracking/tier enforcement (Sprint 5)
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# D0: PRESERVATION CONTRACTS — DO NOT BREAK
+# =============================================================================
+# Source: docs/inventories/sprint1/
+# These 20 callables MUST survive Sprint 2 unchanged.
+# =============================================================================
+d0_preservation:
+  source: "docs/inventories/sprint1/"
+  rule: "All 20 callables preserved. Signature hashes unchanged."
+
+  files_modified_by_sprint_2:
+    - file: "consensuspress.php"
+      modification: "ADD require_once for new files + ADD AJAX hook + ADD submenu"
+      preserved_functions:
+        - { name: "consensuspress_activate",            sig: "81f6c2f7" }
+        - { name: "consensuspress_deactivate",           sig: "42c266af" }
+        - { name: "consensuspress_init",                 sig: "4796b785", note: "BODY changes — adds require_once lines" }
+        - { name: "consensuspress_ajax_test_connection",  sig: "97f77fa7" }
+    - file: "admin/css/consensuspress-admin.css"
+      modification: "APPEND new rules. No existing rules deleted or changed."
+
+  files_not_modified:
+    - "includes/class-consensuspress-api.php (consumed, not changed)"
+    - "includes/class-consensuspress-settings.php (consumed, not changed)"
+    - "admin/views/settings.php (not touched)"
+    - "admin/js/consensuspress-admin.js (not touched)"
+    - "uninstall.php (not touched)"
+    - "readme.txt (not touched until Sprint 6)"
+
+# =============================================================================
+# D1: FUNCTION SIGNATURES
+# =============================================================================
+# Every function/method with FULL PHPDoc shapes. No bare arrays.
+# WordPress hash notation for $args-style params.
+# PSR array{} for return types.
+# =============================================================================
+d1_signatures:
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-create.php (NEW)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_create:
+    file: "includes/class-consensuspress-create.php"
+    class: "ConsensusPress_Create"
+    purpose: "Handles Create page UI registration and AJAX dispatch"
+
+    methods:
+
+      init:
+        signature: "public function init(): void"
+        purpose: "Register admin submenu page and enqueue hooks"
+        body_logic: |
+          add_action( 'admin_menu', array( $this, 'add_create_submenu' ) );
+          add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_create_assets' ) );
+        phpdoc: |
+          /**
+           * Initialise Create mode hooks.
+           *
+           * @return void
+           */
+        sanitise: "N/A"
+        escape: "N/A"
+        nonce: "N/A"
+
+      add_create_submenu:
+        signature: "public function add_create_submenu(): void"
+        purpose: "Register 'Create Post' submenu under ConsensusPress menu"
+        body_logic: |
+          add_submenu_page(
+              'consensuspress',                              // parent slug (from Settings)
+              __( 'Create Post', 'consensuspress' ),         // page title
+              __( 'Create Post', 'consensuspress' ),         // menu title
+              'edit_posts',                                  // capability
+              'consensuspress-create',                       // menu slug
+              array( $this, 'render_create_page' )           // callback
+          );
+        phpdoc: |
+          /**
+           * Register Create Post submenu page.
+           *
+           * @return void
+           */
+        capability: "edit_posts"
+
+      enqueue_create_assets:
+        signature: "public function enqueue_create_assets( string $hook_suffix ): void"
+        purpose: "Enqueue JS/CSS only on the Create page"
+        body_logic: |
+          if ( 'consensuspress_page_consensuspress-create' !== $hook_suffix ) { return; }
+          wp_enqueue_style(
+              'consensuspress-admin',
+              CONSENSUSPRESS_PLUGIN_URL . 'admin/css/consensuspress-admin.css',
+              array(),
+              CONSENSUSPRESS_VERSION
+          );
+          wp_enqueue_script(
+              'consensuspress-create',
+              CONSENSUSPRESS_PLUGIN_URL . 'admin/js/consensuspress-create.js',
+              array( 'jquery' ),
+              CONSENSUSPRESS_VERSION,
+              true  // in footer
+          );
+          wp_localize_script( 'consensuspress-create', 'consensuspressCreate', array(
+              'ajax_url' => admin_url( 'admin-ajax.php' ),
+              'nonce'    => wp_create_nonce( 'consensuspress_create_post' ),
+              'i18n'     => array(
+                  'processing' => __( 'Generating consensus... This may take up to 60 seconds.', 'consensuspress' ),
+                  'success'    => __( 'Draft created successfully!', 'consensuspress' ),
+                  'error'      => __( 'An error occurred. Please try again.', 'consensuspress' ),
+              ),
+          ) );
+        phpdoc: |
+          /**
+           * Enqueue Create page JavaScript and CSS.
+           *
+           * @param string $hook_suffix Current admin page hook suffix.
+           * @return void
+           */
+
+      render_create_page:
+        signature: "public function render_create_page(): void"
+        purpose: "Load the Create page template"
+        body_logic: |
+          if ( ! current_user_can( 'edit_posts' ) ) {
+              wp_die( esc_html__( 'Insufficient permissions.', 'consensuspress' ) );
+          }
+          require_once CONSENSUSPRESS_PLUGIN_DIR . 'admin/views/create.php';
+        phpdoc: |
+          /**
+           * Render the Create Post admin page.
+           *
+           * @return void
+           */
+        capability: "edit_posts"
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-post-builder.php (NEW)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_post_builder:
+    file: "includes/class-consensuspress-post-builder.php"
+    class: "ConsensusPress_Post_Builder"
+    purpose: "Creates WordPress draft post from API consensus response data"
+    reuse: "Called by Create (Sprint 2) AND Rescue (Sprint 4)"
+
+    constants:
+      RANK_MATH_KEYS:
+        type: "array<string, string>"
+        value: |
+          array(
+              'focus_keyword'  => 'rank_math_focus_keyword',
+              'description'    => 'rank_math_description',
+              'title'          => 'rank_math_title',
+              'schema_article' => 'rank_math_schema_Article',
+              'schema_faq'     => 'rank_math_schema_FAQPage',
+              'pillar_content' => 'rank_math_pillar_content',
+          )
+        note: "Maps our keys to Rank Math meta keys. Verified against RM source."
+
+      CONSENSUS_META_KEYS:
+        type: "array<string, string>"
+        value: |
+          array(
+              'score'             => '_consensuspress_score',
+              'mode'              => '_consensuspress_mode',
+              'champion_provider' => '_consensuspress_champion_provider',
+              'agreement_level'   => '_consensuspress_agreement_level',
+              'oracle_risk_level' => '_consensuspress_oracle_risk_level',
+              'created_at'        => '_consensuspress_created_at',
+          )
+        note: "Underscore prefix = hidden from custom fields UI. Read by meta box (Sprint 3)."
+
+    methods:
+
+      create_draft:
+        signature: |
+          public function create_draft( array $api_data, string $mode = 'create' ): array
+        purpose: "Master method: creates WP draft from validated API response"
+        body_logic: |
+          1. Validate $api_data has required keys (early return on failure)
+          2. Build post args for wp_insert_post()
+          3. Insert post — get $post_id
+          4. Inject Rank Math meta
+          5. Inject consensus meta
+          6. Inject schema markup as post meta
+          7. Sideload featured image (if URL present)
+          8. Assign categories and tags
+          9. Return result array
+        phpdoc: |
+          /**
+           * Create a WordPress draft post from Seekrates API consensus data.
+           *
+           * @param array $api_data {
+           *     Validated consensus response from Seekrates API.
+           *
+           *     @type bool   $consensus_reached   Whether providers reached agreement.
+           *     @type float  $consensus_score      Agreement percentage (0.0-100.0).
+           *     @type string $agreement_level      HIGH|MODERATE|LOW.
+           *     @type array  $champion {
+           *         @type string $provider       Provider name (openai|claude|gemini|mistral|cohere).
+           *         @type string $response_text  Full response text.
+           *         @type int    $score          Quality score (0-100).
+           *         @type bool   $is_refusal     Always false for champion.
+           *     }
+           *     @type string $synthesis            Combined consensus view.
+           *     @type array  $oracle_risk {
+           *         @type string $risk_level      low|medium|high|critical.
+           *         @type array  $assumptions     List of assumptions.
+           *         @type array  $failure_modes   List of failure modes.
+           *         @type string $contrarian_view  Dissenting perspective.
+           *         @type string $recommendation   Action recommendation.
+           *     }
+           *     @type array  $metadata {
+           *         @type string $suggested_title    Post title.
+           *         @type string $focus_keyword      Primary SEO keyword.
+           *         @type string $meta_description   SEO meta description.
+           *         @type string $seo_title          SEO title override.
+           *         @type array  $categories         Category slugs.
+           *         @type array  $tags               Tag names.
+           *     }
+           *     @type string $content_html          Full HTML content.
+           *     @type array  $schema_markup {
+           *         @type array $faq      FAQPage JSON-LD object.
+           *         @type array $article  Article JSON-LD object.
+           *     }
+           *     @type array  $featured_image {
+           *         @type string $url          Unsplash image URL.
+           *         @type string $alt_text     Image alt text.
+           *         @type string $attribution  Photographer credit.
+           *     }
+           * }
+           * @param string $mode Operation mode ('create' or 'rescue').
+           * @return array{success: bool, post_id: int, edit_url: string, message: string}
+           */
+        sanitise:
+          - "suggested_title: sanitize_text_field()"
+          - "content_html: wp_kses_post()"
+          - "focus_keyword: sanitize_text_field()"
+          - "meta_description: sanitize_text_field()"
+          - "seo_title: sanitize_text_field()"
+          - "categories: array_map( 'sanitize_text_field', ... )"
+          - "tags: array_map( 'sanitize_text_field', ... )"
+          - "image URL: esc_url_raw()"
+          - "alt_text: sanitize_text_field()"
+          - "attribution: sanitize_text_field()"
+          - "consensus_score: (float) cast + range validation"
+          - "mode: in_array check against ['create','rescue']"
+
+      validate_api_data:
+        signature: "private function validate_api_data( array $api_data ): bool"
+        purpose: "Check all required top-level keys exist in API response"
+        body_logic: |
+          $required = array(
+              'consensus_reached', 'consensus_score', 'agreement_level',
+              'champion', 'synthesis', 'oracle_risk', 'metadata',
+              'content_html', 'schema_markup', 'featured_image',
+          );
+          foreach ( $required as $key ) {
+              if ( ! array_key_exists( $key, $api_data ) ) { return false; }
+          }
+          // Validate champion sub-keys
+          $champion_required = array( 'provider', 'response_text', 'score', 'is_refusal' );
+          foreach ( $champion_required as $key ) {
+              if ( ! array_key_exists( $key, $api_data['champion'] ) ) { return false; }
+          }
+          // Validate metadata sub-keys
+          if ( ! isset( $api_data['metadata']['suggested_title'] ) ) { return false; }
+          return true;
+        phpdoc: |
+          /**
+           * Validate API response has all required keys.
+           *
+           * @param array $api_data Raw API response data array.
+           * @return bool True if all required keys present.
+           */
+
+      inject_rank_math_meta:
+        signature: "private function inject_rank_math_meta( int $post_id, array $metadata, array $schema_markup ): void"
+        purpose: "Write all 6 Rank Math meta fields to post_meta"
+        body_logic: |
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['focus_keyword'],
+              sanitize_text_field( $metadata['focus_keyword'] ?? '' ) );
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['description'],
+              sanitize_text_field( $metadata['meta_description'] ?? '' ) );
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['title'],
+              sanitize_text_field( $metadata['seo_title'] ?? '' ) );
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['schema_article'],
+              wp_json_encode( $schema_markup['article'] ?? array() ) );
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['schema_faq'],
+              wp_json_encode( $schema_markup['faq'] ?? array() ) );
+          update_post_meta( $post_id, self::RANK_MATH_KEYS['pillar_content'],
+              'on' );  // Mark all consensus posts as pillar content
+        phpdoc: |
+          /**
+           * Inject Rank Math SEO meta fields into post.
+           *
+           * Writes all 6 Rank Math keys. If Rank Math is not installed,
+           * meta values sit in post_meta until it is activated.
+           *
+           * @param int   $post_id       WordPress post ID.
+           * @param array $metadata {
+           *     @type string $focus_keyword      Primary SEO keyword.
+           *     @type string $meta_description   SEO meta description.
+           *     @type string $seo_title          SEO title override.
+           * }
+           * @param array $schema_markup {
+           *     @type array $faq      FAQPage JSON-LD object.
+           *     @type array $article  Article JSON-LD object.
+           * }
+           * @return void
+           */
+
+      inject_consensus_meta:
+        signature: "private function inject_consensus_meta( int $post_id, array $api_data, string $mode ): void"
+        purpose: "Store consensus metadata for meta box display (Sprint 3)"
+        body_logic: |
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['score'],
+              (float) $api_data['consensus_score'] );
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['mode'],
+              sanitize_text_field( $mode ) );
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['champion_provider'],
+              sanitize_text_field( $api_data['champion']['provider'] ?? '' ) );
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['agreement_level'],
+              sanitize_text_field( $api_data['agreement_level'] ?? '' ) );
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['oracle_risk_level'],
+              sanitize_text_field( $api_data['oracle_risk']['risk_level'] ?? '' ) );
+          update_post_meta( $post_id, self::CONSENSUS_META_KEYS['created_at'],
+              current_time( 'mysql' ) );
+        phpdoc: |
+          /**
+           * Store consensus metadata in post_meta.
+           *
+           * These are read by the consensus meta box (Sprint 3).
+           * Underscore-prefixed keys are hidden from the custom fields UI.
+           *
+           * @param int    $post_id  WordPress post ID.
+           * @param array  $api_data Full API response (reads consensus_score, champion, etc).
+           * @param string $mode     'create' or 'rescue'.
+           * @return void
+           */
+
+      sideload_featured_image:
+        signature: "private function sideload_featured_image( int $post_id, array $featured_image ): bool"
+        purpose: "Download Unsplash image and set as post featured image"
+        body_logic: |
+          1. Validate URL with esc_url_raw()
+          2. Require 'media.php', 'file.php', 'image.php' if not loaded
+          3. Call media_sideload_image( $url, $post_id, $alt_text )
+          4. If WP_Error, return false (graceful degradation)
+          5. Get attachment ID from returned HTML
+          6. set_post_thumbnail( $post_id, $attachment_id )
+          7. Update attachment alt text meta
+          8. Store attribution as post meta _consensuspress_image_attribution
+          9. Return true
+        phpdoc: |
+          /**
+           * Sideload featured image from Unsplash and attach to post.
+           *
+           * Falls back gracefully if download fails — post is still created
+           * without featured image rather than failing entirely.
+           *
+           * @param int   $post_id        WordPress post ID.
+           * @param array $featured_image {
+           *     @type string $url          Unsplash image URL.
+           *     @type string $alt_text     Image alt text.
+           *     @type string $attribution  Photographer credit.
+           * }
+           * @return bool True if image sideloaded, false on failure.
+           */
+        sanitise:
+          - "$featured_image['url']: esc_url_raw()"
+          - "$featured_image['alt_text']: sanitize_text_field()"
+          - "$featured_image['attribution']: sanitize_text_field()"
+
+      assign_taxonomy_terms:
+        signature: "private function assign_taxonomy_terms( int $post_id, array $metadata ): void"
+        purpose: "Assign categories and tags from API metadata"
+        body_logic: |
+          1. Categories: foreach $metadata['categories'], get_cat_ID() or wp_create_category()
+          2. wp_set_post_categories( $post_id, $cat_ids )
+          3. Tags: wp_set_post_tags( $post_id, $metadata['tags'], false )
+        phpdoc: |
+          /**
+           * Assign categories and tags to post from API metadata.
+           *
+           * Creates categories if they don't exist. Tags are created automatically
+           * by WordPress when passed as strings.
+           *
+           * @param int   $post_id  WordPress post ID.
+           * @param array $metadata {
+           *     @type array $categories  Category slug strings.
+           *     @type array $tags        Tag name strings.
+           * }
+           * @return void
+           */
+
+  # ---------------------------------------------------------------------------
+  # FILE: consensuspress.php (MODIFIED — additions only)
+  # ---------------------------------------------------------------------------
+  consensuspress_main_additions:
+    file: "consensuspress.php"
+    modification_type: "ADD — no existing code changed"
+
+    new_function:
+      consensuspress_ajax_create_post:
+        signature: "function consensuspress_ajax_create_post(): void"
+        purpose: "AJAX handler for Create mode form submission"
+        body_logic: |
+          1. check_ajax_referer( 'consensuspress_create_post', 'nonce' )
+          2. current_user_can( 'edit_posts' ) or wp_send_json_error()
+          3. $topic = sanitize_text_field( wp_unslash( $_POST['topic'] ?? '' ) )
+          4. $context = sanitize_textarea_field( wp_unslash( $_POST['context'] ?? '' ) )
+          5. Validate topic length >= 10
+          6. $api_key = get_option( 'consensuspress_api_key', '' )
+          7. Validate $api_key not empty
+          8. $api = new ConsensusPress_API( $api_key )
+          9. $result = $api->query( $topic, 'create', $context )
+          10. If ! $result['success'], wp_send_json_error( $result )
+          11. $builder = new ConsensusPress_Post_Builder()
+          12. $draft = $builder->create_draft( $result['data'], 'create' )
+          13. wp_send_json_success( $draft ) or wp_send_json_error( $draft )
+        phpdoc: |
+          /**
+           * AJAX handler for Create Post form submission.
+           *
+           * Receives topic and context from admin form, calls Seekrates API,
+           * creates WordPress draft with full metadata.
+           *
+           * @return void Sends JSON response via wp_send_json_success/error.
+           */
+        sanitise:
+          - "$_POST['topic']: sanitize_text_field( wp_unslash() )"
+          - "$_POST['context']: sanitize_textarea_field( wp_unslash() )"
+        nonce: "consensuspress_create_post"
+        capability: "edit_posts"
+
+    init_modifications:
+      description: "Add require_once for new files inside consensuspress_init()"
+      lines_added: |
+        require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-create.php';
+        require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-post-builder.php';
+
+        $create = new ConsensusPress_Create();
+        $create->init();
+
+    hooks_added:
+      - "add_action( 'wp_ajax_consensuspress_create_post', 'consensuspress_ajax_create_post', 10 );"
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/views/create.php (NEW)
+  # ---------------------------------------------------------------------------
+  admin_views_create:
+    file: "admin/views/create.php"
+    purpose: "Create Post admin page template"
+    elements:
+      - "ABSPATH guard (line 1-3)"
+      - "Page heading: 'Create AI-Consensus Post'"
+      - "Form with id='consensuspress-create-form'"
+      - "Topic input: text field, name='topic', maxlength=500, required"
+      - "Context textarea: name='context', maxlength=2000, optional"
+      - "Submit button: 'Generate Consensus Draft', type=button (JS handles submit)"
+      - "Status area: div#consensuspress-create-status for spinner/messages"
+      - "NO form action, NO method — JS handles AJAX submission"
+      - "NO inline JS — all in consensuspress-create.js"
+      - "NO nonce field in HTML — JS sends nonce from wp_localize_script"
+    escape_rules:
+      - "All labels: esc_html__()"
+      - "All attributes: esc_attr()"
+      - "All URLs: esc_url()"
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/js/consensuspress-create.js (NEW)
+  # ---------------------------------------------------------------------------
+  admin_js_create:
+    file: "admin/js/consensuspress-create.js"
+    purpose: "AJAX form handler for Create page"
+    dependencies: "jQuery"
+    localized_data: "consensuspressCreate (ajax_url, nonce, i18n)"
+    behaviour:
+      on_submit:
+        - "Disable submit button"
+        - "Show spinner + processing message from i18n"
+        - "jQuery.post( ajax_url, { action: 'consensuspress_create_post', nonce, topic, context } )"
+        - "On success: show success message, redirect to edit_url after 2 seconds"
+        - "On error: show error message from response, re-enable button"
+        - "120 second timeout on AJAX call"
+    no_inline_js: true
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/css/consensuspress-admin.css (MODIFIED — append only)
+  # ---------------------------------------------------------------------------
+  admin_css_additions:
+    file: "admin/css/consensuspress-admin.css"
+    modification_type: "APPEND — no existing rules deleted or changed"
+    new_rules:
+      - ".consensuspress-create-form { max-width: 800px; }"
+      - ".consensuspress-create-form .topic-field { width: 100%; }"
+      - ".consensuspress-create-form .context-field { width: 100%; min-height: 100px; }"
+      - ".consensuspress-create-status { margin-top: 20px; }"
+      - ".consensuspress-create-status .spinner { float: left; margin-right: 10px; }"
+      - ".consensuspress-create-status .success { color: #00a32a; }"
+      - ".consensuspress-create-status .error { color: #d63638; }"
+
+# =============================================================================
+# D2: TEST SCENARIOS
+# =============================================================================
+d2_test_scenarios:
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-create.php (NEW)
+  # ---------------------------------------------------------------------------
+  test_create:
+    file: "tests/test-create.php"
+    class: "ConsensusPress_Create_Test"
+    extends: "PHPUnit\\Framework\\TestCase"
+    fixture_source: "consensuspress_mock_api.yaml"
+
+    scenarios:
+
+      test_create_mode_happy_path:
+        fixture: "fixture_create_success"
+        setup: "Mock transport with fixture JSON, API key in options"
+        action: "Simulate AJAX: topic='AI search optimisation', context=''"
+        assertions:
+          - "wp_send_json_success called (not error)"
+          - "Response has 'post_id' key"
+          - "Response has 'edit_url' key"
+          - "Response has 'success' = true"
+
+      test_create_with_context:
+        fixture: "fixture_create_success"
+        setup: "Mock transport, valid API key"
+        action: "Simulate AJAX: topic='AI search', context='Focus on GEO strategies'"
+        assertions:
+          - "Context string passed to API query() call"
+          - "Draft created successfully"
+
+      test_empty_topic_rejected:
+        fixture: "N/A (validation fires before API call)"
+        setup: "Valid API key"
+        action: "Simulate AJAX: topic='', context=''"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error message: 'Topic must be at least 10 characters.'"
+          - "API query() NOT called"
+
+      test_short_topic_rejected:
+        fixture: "N/A"
+        setup: "Valid API key"
+        action: "Simulate AJAX: topic='short'"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error message: 'Topic must be at least 10 characters.'"
+
+      test_no_api_key_rejected:
+        fixture: "N/A"
+        setup: "API key option empty"
+        action: "Simulate AJAX: topic='Valid topic here'"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error message contains 'API key'"
+
+      test_api_error_forwarded:
+        fixture: "fixture_server_error"
+        setup: "Mock transport returning 500"
+        action: "Simulate AJAX: topic='Valid topic here'"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error data forwarded from API client"
+
+      test_all_refusal_handled:
+        fixture: "fixture_all_refusal"
+        setup: "Mock transport returning 422"
+        action: "Simulate AJAX: topic='Controversial topic'"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error message mentions refusal"
+
+      test_nonce_required:
+        fixture: "N/A"
+        setup: "Valid everything but wrong nonce"
+        action: "Simulate AJAX with invalid nonce"
+        assertions:
+          - "Request dies (wp_die or wp_send_json_error)"
+
+      test_capability_required:
+        fixture: "N/A"
+        setup: "Valid everything but user lacks edit_posts"
+        action: "Simulate AJAX"
+        assertions:
+          - "wp_send_json_error called"
+          - "Error message: 'Insufficient permissions.'"
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-post-builder.php (NEW)
+  # ---------------------------------------------------------------------------
+  test_post_builder:
+    file: "tests/test-post-builder.php"
+    class: "ConsensusPress_Post_Builder_Test"
+    extends: "PHPUnit\\Framework\\TestCase"
+    fixture_source: "consensuspress_mock_api.yaml fixture_create_success"
+
+    scenarios:
+
+      test_draft_creation_with_full_metadata:
+        fixture: "fixture_create_success (decoded to array)"
+        setup: "Stub wp_insert_post, update_post_meta, etc."
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "wp_insert_post called with post_title = metadata.suggested_title"
+          - "wp_insert_post called with post_content = content_html (sanitised)"
+          - "wp_insert_post called with post_status = default from settings"
+          - "wp_insert_post called with post_type = 'post'"
+          - "Return array has 'success' = true"
+          - "Return array has 'post_id' > 0"
+
+      test_rank_math_six_fields:
+        fixture: "fixture_create_success"
+        setup: "Stub update_post_meta tracking calls"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "update_post_meta called with 'rank_math_focus_keyword'"
+          - "update_post_meta called with 'rank_math_description'"
+          - "update_post_meta called with 'rank_math_title'"
+          - "update_post_meta called with 'rank_math_schema_Article'"
+          - "update_post_meta called with 'rank_math_schema_FAQPage'"
+          - "update_post_meta called with 'rank_math_pillar_content'"
+
+      test_consensus_meta_stored:
+        fixture: "fixture_create_success"
+        setup: "Stub update_post_meta"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "update_post_meta called with '_consensuspress_score' = 87.5"
+          - "update_post_meta called with '_consensuspress_mode' = 'create'"
+          - "update_post_meta called with '_consensuspress_champion_provider' = 'openai'"
+          - "update_post_meta called with '_consensuspress_agreement_level' = 'HIGH'"
+          - "update_post_meta called with '_consensuspress_oracle_risk_level' = 'low'"
+          - "update_post_meta called with '_consensuspress_created_at' (non-empty)"
+
+      test_schema_markup_stored:
+        fixture: "fixture_create_success"
+        setup: "Stub update_post_meta"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "rank_math_schema_FAQPage contains valid JSON"
+          - "JSON decoded contains @type = 'FAQPage'"
+          - "rank_math_schema_Article contains valid JSON"
+          - "JSON decoded contains @type = 'Article'"
+
+      test_featured_image_sideload:
+        fixture: "fixture_create_success"
+        setup: "Stub media_sideload_image returning attachment HTML"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "media_sideload_image called with Unsplash URL"
+          - "set_post_thumbnail called"
+          - "Alt text meta updated on attachment"
+          - "Attribution stored as _consensuspress_image_attribution"
+
+      test_image_failure_graceful:
+        fixture: "fixture_create_success (modified: featured_image.url = invalid)"
+        setup: "Stub media_sideload_image returning WP_Error"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "Draft STILL created successfully"
+          - "Return success = true"
+          - "No featured image set (graceful degradation)"
+
+      test_categories_assigned:
+        fixture: "fixture_create_success"
+        setup: "Stub get_cat_ID, wp_create_category, wp_set_post_categories"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "wp_set_post_categories called"
+          - "Categories include 'technology' (from fixture)"
+
+      test_tags_assigned:
+        fixture: "fixture_create_success"
+        setup: "Stub wp_set_post_tags"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "wp_set_post_tags called"
+          - "Tags include 'ai-search', 'geo', 'consensus' (from fixture)"
+
+      test_invalid_api_data_rejected:
+        fixture: "Empty array"
+        setup: "No stubs needed"
+        action: "$builder->create_draft( array(), 'create' )"
+        assertions:
+          - "Return array has 'success' = false"
+          - "Return array has 'message' mentioning 'Invalid'"
+          - "wp_insert_post NOT called"
+
+      test_missing_champion_rejected:
+        fixture: "fixture_create_success with 'champion' key removed"
+        setup: "No stubs needed"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "Return success = false"
+          - "Validation catches missing champion"
+
+      test_content_html_sanitised:
+        fixture: "fixture_create_success (modified: content_html contains <script>)"
+        setup: "Stub wp_insert_post"
+        action: "$builder->create_draft( $api_data, 'create' )"
+        assertions:
+          - "wp_insert_post called"
+          - "post_content does NOT contain <script> tag"
+          - "wp_kses_post applied"
+
+# =============================================================================
+# D3: CONTRACT MAP (OUTPUT/INPUT BALANCE)
+# =============================================================================
+d3_contracts:
+
+  # Create page form → AJAX handler
+  contract_1:
+    output:
+      producer: "admin/views/create.php + admin/js/consensuspress-create.js"
+      data: "{ action: 'consensuspress_create_post', nonce, topic, context }"
+    input:
+      consumer: "consensuspress_ajax_create_post() in consensuspress.php"
+      reads: "$_POST['topic'], $_POST['context'], nonce"
+    balance: "VERIFIED"
+
+  # AJAX handler → API client
+  contract_2:
+    output:
+      producer: "consensuspress_ajax_create_post()"
+      data: "$api->query( $topic, 'create', $context )"
+    input:
+      consumer: "ConsensusPress_API::query() (Sprint 1 — unchanged)"
+      reads: "string $query, string $mode, string $context"
+    balance: "VERIFIED — Sprint 1 signatures match"
+
+  # API client → Post Builder
+  contract_3:
+    output:
+      producer: "ConsensusPress_API::query() returns array{success, data, error, http_status}"
+      data: "$result['data'] (full consensus response)"
+    input:
+      consumer: "ConsensusPress_Post_Builder::create_draft( array $api_data, string $mode )"
+      reads: "13 top-level keys from api_data (see D1 PHPDoc shape)"
+    balance: "VERIFIED — api_data shape matches mock_api.yaml response_success schema"
+
+  # Post Builder → WordPress
+  contract_4:
+    output:
+      producer: "ConsensusPress_Post_Builder::create_draft()"
+      data: "wp_insert_post args, update_post_meta calls, media_sideload_image"
+    input:
+      consumer: "WordPress core functions"
+      reads: "Standard WP function signatures"
+    balance: "VERIFIED — all WP functions are core API"
+
+  # AJAX handler → JS
+  contract_5:
+    output:
+      producer: "consensuspress_ajax_create_post() via wp_send_json_success()"
+      data: "{ success: true, post_id: int, edit_url: string, message: string }"
+    input:
+      consumer: "admin/js/consensuspress-create.js success callback"
+      reads: "response.data.post_id, response.data.edit_url, response.data.message"
+    balance: "VERIFIED"
+
+  # Consensus meta → Meta box (Sprint 3, forward contract)
+  contract_6:
+    output:
+      producer: "ConsensusPress_Post_Builder::inject_consensus_meta()"
+      data: "6 post_meta keys (CONSENSUS_META_KEYS)"
+    input:
+      consumer: "Sprint 3 meta box (reads these keys on post edit screen)"
+      reads: "_consensuspress_score, _mode, _champion_provider, _agreement_level, _oracle_risk_level, _created_at"
+    balance: "FORWARD CONTRACT — Sprint 3 must read exactly these keys"
+
+# =============================================================================
+# D4: FILE MANIFEST WITH DNA HEADERS
+# =============================================================================
+d4_manifest:
+
+  new_files:
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-create.php"
+      dna:
+        file: "includes/class-consensuspress-create.php"
+        version: "1.0.0"
+        purpose: "Create mode page handler and asset enqueue"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D1 class_consensuspress_create"
+        php_version: "7.4+"
+        dependencies: "class-consensuspress-api.php, class-consensuspress-post-builder.php"
+        reusable: "No — WordPress admin page handler"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+      dna:
+        file: "includes/class-consensuspress-post-builder.php"
+        version: "1.0.0"
+        purpose: "Create WordPress draft from Seekrates API consensus data"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D1 class_consensuspress_post_builder"
+        php_version: "7.4+"
+        dependencies: "WordPress core (wp_insert_post, update_post_meta, media_sideload_image)"
+        reusable: "Yes — called by Create (Sprint 2) and Rescue (Sprint 4)"
+
+    - path: "plugin/consensuspress/admin/views/create.php"
+      dna:
+        file: "admin/views/create.php"
+        version: "1.0.0"
+        purpose: "Create Post admin page template"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D1 admin_views_create"
+        php_version: "7.4+"
+        dependencies: "WordPress admin functions"
+        reusable: "No — template"
+
+    - path: "plugin/consensuspress/admin/js/consensuspress-create.js"
+      dna:
+        file: "admin/js/consensuspress-create.js"
+        version: "1.0.0"
+        purpose: "AJAX handler for Create Post form"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D1 admin_js_create"
+        dependencies: "jQuery, consensuspressCreate localized object"
+        reusable: "No — page-specific"
+
+    - path: "tests/test-create.php"
+      dna:
+        file: "tests/test-create.php"
+        version: "1.0.0"
+        purpose: "Test Create mode handler"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D2 test_create"
+        test_count: 9
+        fixture_source: "consensuspress_mock_api.yaml"
+
+    - path: "tests/test-post-builder.php"
+      dna:
+        file: "tests/test-post-builder.php"
+        version: "1.0.0"
+        purpose: "Test Post Builder draft creation and meta injection"
+        author: "C-C (Session 03, Sprint 2)"
+        spec: "sprint2_d1_d7.yaml D2 test_post_builder"
+        test_count: 11
+        fixture_source: "consensuspress_mock_api.yaml fixture_create_success"
+
+  modified_files:
+
+    - path: "plugin/consensuspress/consensuspress.php"
+      dna_version_bump: "1.0.0 → 1.1.0"
+      changes:
+        - "ADD require_once for class-consensuspress-create.php"
+        - "ADD require_once for class-consensuspress-post-builder.php"
+        - "ADD ConsensusPress_Create instantiation and init() call"
+        - "ADD consensuspress_ajax_create_post() function"
+        - "ADD wp_ajax hook for create_post"
+
+    - path: "plugin/consensuspress/admin/css/consensuspress-admin.css"
+      dna_version_bump: "1.0.0 → 1.1.0"
+      changes: "APPEND create page rules (no existing rules modified)"
+
+# =============================================================================
+# D5: DEPENDENCY MAP
+# =============================================================================
+d5_dependencies:
+
+  class_consensuspress_create:
+    depends_on:
+      - "ConsensusPress_API (Sprint 1 — consumed, not modified)"
+      - "ConsensusPress_Post_Builder (Sprint 2 — new)"
+      - "WordPress: add_submenu_page, wp_enqueue_script/style, wp_localize_script"
+    depended_on_by:
+      - "consensuspress.php (instantiates and calls init())"
+
+  class_consensuspress_post_builder:
+    depends_on:
+      - "WordPress: wp_insert_post, update_post_meta, media_sideload_image"
+      - "WordPress: set_post_thumbnail, get_cat_ID, wp_create_category"
+      - "WordPress: wp_set_post_categories, wp_set_post_tags"
+      - "WordPress: wp_kses_post, sanitize_text_field, esc_url_raw"
+      - "WordPress: wp_json_encode, current_time"
+    depended_on_by:
+      - "consensuspress_ajax_create_post() in consensuspress.php"
+      - "Sprint 4 Rescue mode (future — same create_draft method)"
+
+  admin_views_create:
+    depends_on:
+      - "WordPress: esc_html__, esc_attr, esc_url, wp_nonce_field (none — JS handles nonce)"
+    depended_on_by:
+      - "ConsensusPress_Create::render_create_page()"
+
+  admin_js_create:
+    depends_on:
+      - "jQuery (WordPress bundled)"
+      - "consensuspressCreate localized object (from enqueue_create_assets)"
+    depended_on_by:
+      - "admin/views/create.php (enqueued on that page)"
+
+# =============================================================================
+# D6: MOCK DATA REQUIREMENTS
+# =============================================================================
+d6_mock_data:
+
+  fixtures_used_from_mock_api:
+    - fixture: "fixture_create_success"
+      used_by: "test-create.php, test-post-builder.php"
+      purpose: "Happy path — full consensus response"
+
+    - fixture: "fixture_partial_refusal"
+      used_by: "test-post-builder.php (optional — validates builder handles partial data)"
+      purpose: "1 provider refused, 4 respond"
+
+    - fixture: "fixture_all_refusal"
+      used_by: "test-create.php::test_all_refusal_handled"
+      purpose: "HTTP 422 — all providers refused"
+
+    - fixture: "fixture_server_error"
+      used_by: "test-create.php::test_api_error_forwarded"
+      purpose: "HTTP 500 — server error"
+
+  wordpress_function_stubs_needed:
+    note: "Extend existing tests/bootstrap.php stub set"
+    new_stubs:
+      - "wp_insert_post( array $args ): int — returns incrementing post ID"
+      - "update_post_meta( int $post_id, string $key, $value ): bool — tracks calls"
+      - "set_post_thumbnail( int $post_id, int $attachment_id ): bool"
+      - "media_sideload_image( string $url, int $post_id, string $desc ): string|WP_Error"
+      - "get_cat_ID( string $cat_name ): int — returns 0 (not found) or 1"
+      - "wp_create_category( string $cat_name ): int — returns incrementing ID"
+      - "wp_set_post_categories( int $post_id, array $cat_ids ): bool"
+      - "wp_set_post_tags( int $post_id, $tags, bool $append ): bool"
+      - "wp_kses_post( string $content ): string — returns content unchanged in tests"
+      - "current_time( string $type ): string — returns fixed datetime"
+      - "wp_json_encode( $data ): string — wrapper for json_encode"
+      - "get_edit_post_link( int $post_id ): string — returns '/wp-admin/post.php?post={id}&action=edit'"
+      - "add_submenu_page( ... ): void — no-op in tests"
+      - "wp_die( string $msg ): void — throws exception in tests"
+
+# =============================================================================
+# D7: VERIFICATION CHECKLIST
+# =============================================================================
+d7_verification:
+
+  scanner_gates:
+    - gate: "hal001_php_scanner"
+      command: "php hal001_php_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+    - gate: "wp_compliance_scanner"
+      command: "php wp_compliance_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+    - gate: "inventory_php"
+      command: "php inventory_php.php for each new production PHP file"
+      expected: "Generates clean inventory YAML for Sprint 2 files"
+
+  test_gates:
+    - gate: "Existing Sprint 1 tests still pass"
+      command: "Run test-api-client.php and test-settings.php"
+      expected: "16 tests, 55 assertions, 0 failures"
+
+    - gate: "New Sprint 2 tests pass"
+      command: "Run test-create.php and test-post-builder.php"
+      expected: "20 tests (9 + 11), all pass on first run"
+
+  manual_checklist:
+    - "All 20 Sprint 1 callables preserved (D0)"
+    - "All new functions have complete DNA headers"
+    - "All new functions have PHPDoc shapes (no bare arrays)"
+    - "All $_POST reads wrapped in sanitize_text_field/sanitize_textarea_field"
+    - "All output in templates wrapped in esc_html/esc_attr/esc_url"
+    - "ABSPATH guard in every new PHP file"
+    - "No inline JS or CSS"
+    - "No hardcoded API keys or URLs (uses CONSENSUSPRESS_* constants)"
+    - "Nonce verification in AJAX handler"
+    - "Capability check in AJAX handler and render method"
+    - "Contract balance verified (D3 — all 6 contracts balanced)"
+    - "content_html passed through wp_kses_post before wp_insert_post"
+
+# =============================================================================
+# END OF SPRINT 2 D1-D7 SPECIFICATION
+# =============================================================================

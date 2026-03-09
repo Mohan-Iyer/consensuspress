@@ -1,0 +1,212 @@
+# =============================================================================
+# HANDOVER: seekrates_publisher → ConsensusPress (WordPress Plugin)
+# =============================================================================
+# From: D-C@seekrates_publisher (Session 62)
+# To:   D-C@ConsensusPress
+# Date: 2026-02-22
+# Author: D-C (Designer Claude) for Mohan Iyer
+# =============================================================================
+
+# =============================================================================
+# 1. WHAT YOU'RE INHERITING
+# =============================================================================
+what_exists:
+
+  seekrates_publisher: |
+    A Python CLI pipeline that automates:
+    Calendar YAML → Seekrates AI (5-model consensus) → Gmail → Parse → 
+    Format (SEO-optimized HTML) → WordPress REST API → Social Media Posts.
+    
+    One command: python3 -m src.batch_submit full-pipeline --file calendar.yaml
+    Zero manual intervention. 201 posts published. All RM 81+.
+
+  core_files:
+    orchestrator: "src/batch_submit.py — full-pipeline command, 7-step process"
+    email_parser: "src/email_parser.py — extracts ParsedConsensus from Seekrates emails"
+    content_formatter: "src/content_formatter.py — builds SEO HTML from parsed data"
+    seo_optimizer: "src/seo_optimizer.py — schemas, meta descriptions, keywords"
+    wp_publisher: "src/wp_publisher.py — WordPress REST API publishing"
+    image_handler: "src/image_handler.py — Unsplash fetch + WP media upload"
+    config: "src/config/config.py — .env credential loader"
+
+  template: "templates/seekrates_blog_post_template.html (Jinja2, v6.0.0)"
+
+  proven_numbers:
+    total_posts: 201
+    rm_score_range: "81-93 (avg 83)"
+    consensus_range: "50%-85% (avg 74%)"
+    categories: 15
+    featured_images: "162/201 (Jan batch had images, Feb batch didn't)"
+
+# =============================================================================
+# 2. THE CRITICAL PROBLEM YOU'RE SOLVING
+# =============================================================================
+problem:
+
+  diagnosis: |
+    seekrates_publisher is content-first, not keyword-first.
+    Pipeline: interesting query → AI consensus → retrofit a keyword.
+    Result: 201 posts with excellent on-page SEO targeting keywords
+    nobody searches for. Only 1 keyword ranking. Near-zero organic traffic.
+
+  root_cause: |
+    RM score measures structural optimization, not search demand.
+    A perfectly optimized post targeting a zero-volume keyword ranks nowhere.
+    Google still indexes on keywords. LLMs cite pages that rank in Google.
+    No Google rank → no LLM citation. GEO/AEO is additive, not replacement.
+
+  required_inversion: |
+    CURRENT:  query → content → retrofit keyword (broken)
+    CORRECT:  keyword research (volume + difficulty) → design query → content
+
+# =============================================================================
+# 3. WHAT CONSENSUSPRESS MUST DO DIFFERENTLY
+# =============================================================================
+plugin_requirements:
+
+  pipeline_inversion: |
+    The WordPress plugin must start from keyword research, not content ideas.
+    User flow: 
+    1. User enters seed topic in WP admin
+    2. Plugin suggests keywords with search volume + difficulty (via API)
+    3. User selects keyword → plugin generates optimized query
+    4. Query → Seekrates AI → consensus content
+    5. Content formatted with keyword-first SEO → publish
+    
+    The keyword drives the query, not the other way around.
+
+  keyword_api_options:
+    - "Ahrefs API (paid, best data)"
+    - "SEMrush API (paid, good data)"
+    - "Google Keyword Planner API (free with Ads account)"
+    - "KeywordTool.io API (freemium)"
+    - "DataForSEO API (affordable, good for plugins)"
+
+  architecture_note: |
+    seekrates_publisher is Python. WordPress plugins are PHP.
+    DO NOT translate Python → PHP line by line.
+    Extract the LOGIC (pipeline steps, SEO rules, schema generation)
+    and re-implement natively in PHP using WordPress conventions:
+    - WP_REST_API for publishing (already native)
+    - wp_remote_post() for Seekrates API calls
+    - WordPress Settings API for configuration
+    - WP-Cron for scheduling
+    - Rank Math API hooks for SEO meta injection
+
+# =============================================================================
+# 4. REUSABLE COMPONENTS (extract logic, not code)
+# =============================================================================
+reusable_logic:
+
+  from_content_formatter:
+    - "Slug generation from focus keyword"
+    - "Excerpt format: '{consensus_pct}% AI consensus: {first_sentence}'"
+    - "H2 heading pattern with focus keyword injection"
+    - "Table of Contents generation"
+    - "40-60 word paragraph chunking for LLM-SEO"
+    - "Internal category link injection"
+    - "External reference link injection"
+
+  from_seo_optimizer:
+    - "FAQ schema generation (FAQPage JSON-LD)"
+    - "Article schema generation (BlogPosting JSON-LD)"
+    - "Meta description: '{consensus_pct}% AI consensus: {synthesis[:120]}'"
+    - "SEO title format: '{Focus Keyword}: 5 AIs Reveal Key Insights'"
+    - "Keyword extraction from synthesis"
+
+  from_email_parser:
+    - "ParsedConsensus data model (query, synthesis, agreement_%, champion, provider_responses)"
+    - "Consensus percentage extraction"
+    - "Champion agent identification"
+    - "Points of agreement/divergence extraction"
+
+  from_batch_submit:
+    - "Calendar-to-pipeline orchestration pattern"
+    - "Balance checking (inputs must produce outputs)"
+    - "Status tracking (pending → submitted → published)"
+
+# =============================================================================
+# 5. SEO RULES THAT WORK (keep these)
+# =============================================================================
+proven_seo_rules:
+
+  rank_math_checklist:
+    - "Focus keyword in first 10% of content"
+    - "Focus keyword in SEO title"
+    - "Focus keyword in meta description"
+    - "Focus keyword in at least 1 H2"
+    - "Focus keyword in image alt text"
+    - "Image present in content body"
+    - "1500+ words (individual AI responses add bulk)"
+    - "External outbound link in intro"
+    - "Internal link to category archive"
+    - "Table of Contents present"
+    - "FAQ schema (FAQPage JSON-LD)"
+    - "Article schema (BlogPosting JSON-LD)"
+
+  llm_seo_additions:
+    - "40-60 word paragraphs (LLM parsing sweet spot)"
+    - "Direct question as opening sentence (citation bait)"
+    - "Structured data for LLM crawlers"
+    - "robots.txt allows GPTBot, PerplexityBot, ClaudeBot"
+    - "llms.txt plugin installed"
+
+# =============================================================================
+# 6. KNOWN ISSUES TO NOT INHERIT
+# =============================================================================
+known_issues:
+
+  do_not_carry_forward:
+    - issue: "Content-first pipeline (no keyword research)"
+      status: "THIS IS WHY CONSENSUSPRESS EXISTS — the fix"
+    - issue: "Image handler not wired into batch_submit.py"
+      note: "Images only work via main.py (legacy path). Plugin should handle natively."
+    - issue: ".title() mangles acronyms (AI → Ai)"
+      fix: "fix_acronyms() exists but must be applied everywhere"
+    - issue: "FAQ schema only generates 1 entry (synthesis doesn't split)"
+      note: "ISS-024 code works but data shape doesn't trigger supplementary Qs"
+    - issue: "Emoji encoding broken in SMP posts (Ã°Å¸â€Â®)"
+      note: "UTF-8 encoding issue in content_formatter.py SMP methods"
+
+# =============================================================================
+# 7. FILES TO READ FIRST
+# =============================================================================
+reading_list:
+
+  priority_1_architecture:
+    - "seekrates_publisher_compact_sysdocs.yaml — full pipeline architecture"
+    - "seekrates_publisher_implementation_plan.yaml — phases and status"
+
+  priority_2_source:
+    - "src/content_formatter.py — the brain (SEO rules, HTML generation)"
+    - "src/seo_optimizer.py — schema and meta generation"
+    - "src/batch_submit.py — orchestration logic"
+    - "templates/seekrates_blog_post_template.html — output format"
+
+  priority_3_data:
+    - "data/seekrates_posts_data.csv — 201 posts with consensus%, RM scores, URLs"
+    - "plans/Calendars/T0105_ai_ethics.yaml — example calendar format"
+
+# =============================================================================
+# 8. STRATEGIC CONTEXT
+# =============================================================================
+strategic_context:
+
+  wordpress_com_campaign: |
+    A parallel campaign targets Automattic for licensing seekrates_publisher 
+    as a WordPress.com integration. ConsensusPress (the plugin) is the 
+    wordpress.org route — different market, same technology.
+    
+    Campaign details: wordpress_com_campaign_handover.yaml
+
+  mohan_architecture_separation: |
+    - Seekrates AI ENGINE (app.seekrates-ai.com): 5-model consensus — NOT FOR SALE
+    - seekrates_publisher PIPELINE: formats + publishes — FOR SALE/LICENSE
+    - ConsensusPress PLUGIN: WordPress-native version of the pipeline
+    
+    The engine is the moat. The plugin consumes the engine via API.
+
+  pricing_context: |
+    ConsensusPress will need API credits model (Seekrates AI isn't free).
+    Consider: freemium (5 posts/month free, paid tiers after).
+    See Seekrates_AI_Playbook_Monetisation_Strategy.docx for pricing thinking.

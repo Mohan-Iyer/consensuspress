@@ -1,0 +1,788 @@
+# =============================================================================
+# SPRINT 4: RESCUE MODE + DIFF VIEWER — D1-D7 SPECIFICATION
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Sprint:   4 of 6
+# Author:   D-C (Session 06)
+# Date:     2026-03-01
+# Method:   AFD v1.3.0
+# HLR ref:  Build Sequence Steps 6-7
+# Mock ref: consensuspress_mock_api.yaml (fixture_rescue_success)
+# =============================================================================
+# SCOPE:
+#   Part A — Rescue Mode
+#     User selects existing published post → plugin extracts content HTML →
+#     dispatches async job (reusing Sprint 3 ConsensusPress_Async) →
+#     Seekrates API restructures for AI-search survival →
+#     new rescued draft created (original post UNTOUCHED) →
+#     diff metadata stored as post_meta on the rescued draft.
+#
+#   Part B — Diff Viewer
+#     Read-only side-by-side template rendered on the rescued draft
+#     edit screen showing original HTML vs rescued HTML. Pure PHP,
+#     no external diff library dependency.
+#
+# OUT OF SCOPE (future sprints):
+#   - Usage tracking / tier enforcement (Sprint 5)
+#   - WordPress.org packaging (Sprint 6)
+# =============================================================================
+#
+# ARCHITECTURE DECISION: ConsensusPress_Async extension
+#   Problem: schedule_job() hardcodes mode='create' and stores only
+#            topic + context. Rescue needs mode='rescue' + post_id +
+#            content_html (up to 50,000 chars).
+#   Solution: ADD schedule_rescue_job() to ConsensusPress_Async.
+#            EXTEND process_job() to branch on job_data['mode'].
+#            PRESERVE schedule_job() signature and create path — unchanged.
+#   Risk:    None. Additive only. Create tests must still pass 34/34.
+#
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# D0: PRESERVATION CONTRACTS — DO NOT BREAK
+# =============================================================================
+# ALL 34 existing tests must pass after Sprint 4.
+# C-C must run full suite before delivery.
+# =============================================================================
+d0_preservation:
+  rule: "All 34 existing tests preserved. Zero regressions permitted."
+
+  files_modified_by_sprint_4:
+
+    - file: "consensuspress.php"
+      current_version: "1.2.0"
+      new_version: "1.3.0"
+      modification: |
+        ADD require_once for class-consensuspress-rescue.php.
+        ADD wp_ajax_ hooks for rescue_post and poll_rescue_job.
+        ADD consensuspress_ajax_rescue_post() handler function.
+        ADD consensuspress_ajax_poll_rescue_job() handler function.
+        NO changes to existing functions or hooks.
+      preserved_functions:
+        - consensuspress_activate
+        - consensuspress_deactivate
+        - consensuspress_init
+        - consensuspress_ajax_test_connection
+        - consensuspress_ajax_create_post
+        - consensuspress_ajax_poll_job
+
+    - file: "includes/class-consensuspress-async.php"
+      current_version: "1.0.0"
+      new_version: "1.1.0"
+      modification: |
+        ADD schedule_rescue_job( int $post_id, string $content_html ): string
+        EXTEND process_job() to branch on job_data['mode']:
+          - 'create' branch: existing logic UNCHANGED
+          - 'rescue' branch: new logic using job_data['post_id'] + job_data['content_html']
+        NO changes to schedule_job() signature or create path.
+      preserved_methods:
+        - init()
+        - schedule_job()       # signature unchanged: ( string $topic, string $context ): string
+        - get_job_status()     # unchanged
+        - cleanup_job()        # unchanged
+        - spawn_cron()         # unchanged
+
+    - file: "admin/css/consensuspress-admin.css"
+      current_version: "1.2.0"
+      new_version: "1.3.0"
+      modification: "APPEND rescue page + diff viewer styles. No existing rules deleted."
+
+  files_not_modified:
+    - "includes/class-consensuspress-api.php"
+    - "includes/class-consensuspress-settings.php"
+    - "includes/class-consensuspress-post-builder.php"
+    - "includes/class-consensuspress-create.php"
+    - "includes/class-consensuspress-meta-box.php"
+    - "includes/interface-consensuspress-transport.php"
+    - "admin/views/settings.php"
+    - "admin/views/create.php"
+    - "admin/views/meta-box.php"
+    - "admin/views/meta-box-empty.php"
+    - "admin/js/consensuspress-create.js"
+    - "admin/js/consensuspress-admin.js"
+    - "uninstall.php"
+    - "readme.txt"
+
+# =============================================================================
+# D1: FUNCTION SIGNATURES
+# =============================================================================
+# Every method with FULL PHPDoc shapes. No bare arrays.
+# WordPress hash notation for $args-style params.
+# PSR array{} for return types.
+# =============================================================================
+d1_signatures:
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-rescue.php (NEW)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_rescue:
+    file: "includes/class-consensuspress-rescue.php"
+    class: "ConsensusPress_Rescue"
+    version: "1.0.0"
+    purpose: "Rescue page UI registration, post content extraction, async job dispatch"
+    constants: {}
+    properties:
+      MAX_CONTENT_LENGTH:
+        type: "int"
+        value: 50000
+        visibility: "private"
+        purpose: "Maximum characters of post content sent to API"
+
+    methods:
+
+      init:
+        signature: "public function init(): void"
+        purpose: "Register admin submenu page and enqueue hooks"
+        body_logic: |
+          add_action( 'admin_menu', array( $this, 'add_rescue_submenu' ) );
+          add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_rescue_assets' ) );
+
+      add_rescue_submenu:
+        signature: "public function add_rescue_submenu(): void"
+        purpose: "Add Rescue submenu under ConsensusPress top-level menu"
+        body_logic: |
+          add_submenu_page(
+            'consensuspress',
+            __( 'Rescue Post', 'consensuspress' ),
+            __( 'Rescue Post', 'consensuspress' ),
+            'edit_posts',
+            'consensuspress-rescue',
+            array( $this, 'render_rescue_page' )
+          );
+
+      render_rescue_page:
+        signature: "public function render_rescue_page(): void"
+        purpose: "Render Rescue admin page — post selector form"
+        body_logic: |
+          require_once CONSENSUSPRESS_PLUGIN_DIR . 'admin/views/rescue.php';
+
+      enqueue_rescue_assets:
+        signature: "public function enqueue_rescue_assets( string $hook ): void"
+        purpose: "Enqueue JS/CSS only on the Rescue admin page"
+        params:
+          hook:
+            type: string
+            description: "WordPress admin page hook suffix"
+        body_logic: |
+          if ( false === strpos( $hook, 'consensuspress-rescue' ) ) {
+            return;
+          }
+          wp_enqueue_style( 'consensuspress-admin', ... );
+          wp_enqueue_script( 'consensuspress-rescue', ... );
+          wp_localize_script( 'consensuspress-rescue', 'consensuspressRescue', array(
+            'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+            'nonce'      => wp_create_nonce( 'consensuspress_rescue_post' ),
+            'pollNonce'  => wp_create_nonce( 'consensuspress_poll_rescue_job' ),
+            'strings'    => array(
+              'submitting' => __( 'Submitting rescue job…', 'consensuspress' ),
+              'polling'    => __( 'Processing… this takes 30-60 seconds.', 'consensuspress' ),
+              'complete'   => __( 'Rescue complete! Redirecting to draft…', 'consensuspress' ),
+              'failed'     => __( 'Rescue failed. Please try again.', 'consensuspress' ),
+              'timeout'    => __( 'Timed out. Please check your drafts.', 'consensuspress' ),
+            ),
+          ) );
+
+      get_published_posts:
+        signature: "public function get_published_posts(): array"
+        purpose: "Return published posts for the rescue post selector dropdown"
+        returns: |
+          array<int, string> — associative: post_id => post_title
+        body_logic: |
+          $posts = get_posts( array(
+            'post_status'    => 'publish',
+            'posts_per_page' => 100,
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+          ) );
+          $result = array();
+          foreach ( $posts as $post ) {
+            $result[ $post->ID ] = $post->post_title;
+          }
+          return $result;
+
+      extract_post_content:
+        signature: "public function extract_post_content( int $post_id ): string"
+        purpose: |
+          Extract and sanitise post content HTML for API submission.
+          Strips shortcodes. Truncates to MAX_CONTENT_LENGTH chars.
+          Returns empty string if post not found or not published.
+        params:
+          post_id:
+            type: int
+            description: "WordPress post ID to extract content from"
+        returns: "string — sanitised content HTML, max 50,000 chars, or empty string on failure"
+        body_logic: |
+          $post = get_post( $post_id );
+          if ( ! $post || 'publish' !== $post->post_status ) {
+            return '';
+          }
+          $content = strip_shortcodes( $post->post_content );
+          $content = wp_kses_post( $content );
+          if ( strlen( $content ) > self::MAX_CONTENT_LENGTH ) {
+            $content = substr( $content, 0, self::MAX_CONTENT_LENGTH );
+          }
+          return $content;
+
+  # ---------------------------------------------------------------------------
+  # FILE: includes/class-consensuspress-async.php (MODIFIED — v1.0.0 → v1.1.0)
+  # ---------------------------------------------------------------------------
+  class_consensuspress_async_additions:
+    file: "includes/class-consensuspress-async.php"
+    note: "ADDITIVE ONLY. All existing methods and constants preserved verbatim."
+
+    new_method_schedule_rescue_job:
+      signature: "public function schedule_rescue_job( int $post_id, string $content_html ): string"
+      purpose: |
+        Schedule an async rescue job for background processing.
+        Stores original post_id so rescued draft can reference it.
+        Returns job UUID for client polling.
+      params:
+        post_id:
+          type: int
+          description: "WordPress post ID of the original post to rescue"
+        content_html:
+          type: string
+          description: "Extracted post content HTML (max 50,000 chars)"
+      returns: "string — UUID job identifier for use with get_job_status()"
+      body_logic: |
+        $job_id   = wp_generate_uuid4();
+        $job_data = array(
+          'status'       => 'pending',
+          'mode'         => 'rescue',
+          'post_id'      => $post_id,
+          'content_html' => $content_html,
+        );
+        set_transient( self::JOB_TRANSIENT_PREFIX . $job_id, $job_data, self::JOB_EXPIRY );
+        wp_schedule_single_event( time(), self::CRON_HOOK, array( $job_id ) );
+        $this->spawn_cron();
+        return $job_id;
+
+    modified_method_process_job:
+      signature: "public function process_job( string $job_id ): void"
+      purpose: |
+        EXTENDED (not replaced). Existing create branch preserved verbatim.
+        New rescue branch added after API call branching on job_data['mode'].
+      rescue_branch_additions: |
+        // After idempotent guard and API key check (existing code unchanged):
+
+        $mode = $job_data['mode'] ?? 'create';
+        if ( 'rescue' === $mode ) {
+          $query   = $job_data['content_html'];
+          $context = '';
+        } else {
+          $query   = $job_data['topic'];      // existing create path
+          $context = $job_data['context'];    // existing create path
+        }
+
+        $result = $api->query( $query, $mode, $context );
+
+        // ... existing success/failure handling unchanged ...
+
+        // Rescue-specific: store original post_id on the rescued draft.
+        if ( 'rescue' === $mode && $draft['success'] ) {
+          update_post_meta(
+            $draft['post_id'],
+            '_consensuspress_original_post_id',
+            absint( $job_data['post_id'] )
+          );
+        }
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/views/rescue.php (NEW)
+  # ---------------------------------------------------------------------------
+  view_rescue:
+    file: "admin/views/rescue.php"
+    purpose: |
+      Admin page template for Rescue mode.
+      Renders post selector dropdown (populated from ConsensusPress_Rescue::get_published_posts()).
+      All output escaped. No form tag — JS handles submission.
+    key_elements:
+      - "Post selector <select> — IDs as values, titles as labels. esc_attr/esc_html."
+      - "Submit button — JS-controlled, disabled during async job."
+      - "Status div #cp-rescue-status — JS writes progress messages here."
+      - "No wp_nonce_field needed — nonce passed via wp_localize_script."
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/views/diff.php (NEW)
+  # ---------------------------------------------------------------------------
+  view_diff:
+    file: "admin/views/diff.php"
+    purpose: |
+      Read-only diff viewer template. Rendered as a meta box on the rescued
+      draft edit screen (registered by ConsensusPress_Meta_Box, extended in
+      Sprint 4). Shows original HTML vs rescued HTML side-by-side.
+      Visible ONLY if _consensuspress_original_post_id post_meta exists.
+    key_elements:
+      - "Two-column layout: left = original, right = rescued."
+      - "Original content retrieved via get_post( $original_post_id )->post_content."
+      - "Rescued content retrieved via get_the_content() on current post."
+      - "Both columns wrapped in <div class='cp-diff-pane'>."
+      - "All output: wp_kses_post() for content, esc_html() for labels."
+      - "cp-diff-viewer wrapper div for CSS targeting."
+
+  # ---------------------------------------------------------------------------
+  # FILE: admin/js/consensuspress-rescue.js (NEW)
+  # ---------------------------------------------------------------------------
+  js_rescue:
+    file: "admin/js/consensuspress-rescue.js"
+    version: "1.0.0"
+    purpose: "Async polling for Rescue mode — identical pattern to consensuspress-create.js"
+    constants:
+      POLL_INTERVAL_MS: 5000
+      MAX_POLL_ATTEMPTS: 24   # 24 × 5s = 120s timeout
+    localized_object: "consensuspressRescue"
+    key_functions:
+      handleSubmit:
+        purpose: |
+          On submit button click:
+          1. Validate post selected (post_id > 0).
+          2. POST to admin-ajax.php action=consensuspress_rescue_post with post_id + nonce.
+          3. On success: receive job_id, start polling.
+          4. On error: display error message.
+      startPolling:
+        purpose: "Initiate polling loop using consensuspressRescue.pollNonce"
+      poll:
+        purpose: |
+          POST to admin-ajax.php action=consensuspress_poll_rescue_job with job_id + nonce.
+          On complete: redirect to edit_url from job status response.
+          On failed: display error.
+          On timeout (MAX_POLL_ATTEMPTS): display timeout message.
+
+  # ---------------------------------------------------------------------------
+  # FILE: consensuspress.php (MODIFIED — v1.2.0 → v1.3.0)
+  # ---------------------------------------------------------------------------
+  consensuspress_php_additions:
+    file: "consensuspress.php"
+    new_require_once: "includes/class-consensuspress-rescue.php"
+    new_init_lines: |
+      // Sprint 4 — Rescue Mode.
+      require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-rescue.php';
+      $rescue = new ConsensusPress_Rescue();
+      $rescue->init();
+    new_ajax_hooks: |
+      add_action( 'wp_ajax_consensuspress_rescue_post',      'consensuspress_ajax_rescue_post' );
+      add_action( 'wp_ajax_consensuspress_poll_rescue_job',  'consensuspress_ajax_poll_rescue_job' );
+
+    new_handler_consensuspress_ajax_rescue_post:
+      signature: "function consensuspress_ajax_rescue_post(): void"
+      purpose: |
+        AJAX handler for Rescue form submission.
+        Validates nonce, capability, post_id.
+        Extracts post content via ConsensusPress_Rescue::extract_post_content().
+        Schedules async rescue job via ConsensusPress_Async::schedule_rescue_job().
+        Returns job_id immediately (non-blocking).
+      nonce_action: "consensuspress_rescue_post"
+      capability: "edit_posts"
+      inputs:
+        post_id: "absint( $_POST['post_id'] )"
+      validations:
+        - "post_id must be > 0"
+        - "extract_post_content() must return non-empty string"
+        - "api_key must be configured in options"
+      returns: |
+        wp_send_json_success( array( 'job_id' => $job_id ) )
+        wp_send_json_error( array( 'message' => '...' ) )
+
+    new_handler_consensuspress_ajax_poll_rescue_job:
+      signature: "function consensuspress_ajax_poll_rescue_job(): void"
+      purpose: |
+        AJAX poll handler for rescue job status.
+        IDENTICAL logic to consensuspress_ajax_poll_job() — only nonce action differs.
+      nonce_action: "consensuspress_poll_rescue_job"
+      capability: "edit_posts"
+      inputs:
+        job_id: "sanitize_text_field( wp_unslash( $_POST['job_id'] ) )"
+      returns: |
+        wp_send_json_success( $status ) where $status = ConsensusPress_Async::get_job_status( $job_id )
+        wp_send_json_error( array( 'message' => 'Invalid job ID.' ) )
+
+# =============================================================================
+# D2: CONSTANTS & META KEYS
+# =============================================================================
+d2_constants:
+
+  class_consensuspress_rescue:
+    MAX_CONTENT_LENGTH:
+      value: 50000
+      type: int
+      purpose: "Prevents oversized payloads to Seekrates API"
+
+  new_post_meta_keys:
+    _consensuspress_original_post_id:
+      stored_on: "Rescued draft post"
+      type: int
+      purpose: "Links rescued draft back to source post. Enables diff viewer."
+      written_by: "ConsensusPress_Async::process_job() rescue branch"
+      read_by: "admin/views/diff.php"
+
+  note: |
+    All existing CONSENSUS_META_KEYS from ConsensusPress_Post_Builder apply
+    to rescued drafts identically — mode stored as 'rescue', scores as normal.
+
+# =============================================================================
+# D3: CONTRACT VERIFICATION (DOUBLE-ENTRY)
+# =============================================================================
+d3_contracts:
+
+  contract_01:
+    name: "Rescue AJAX → Async schedule"
+    debit:
+      producer: "consensuspress_ajax_rescue_post()"
+      output: "Calls ConsensusPress_Async::schedule_rescue_job( int $post_id, string $content_html )"
+    credit:
+      consumer: "ConsensusPress_Async::schedule_rescue_job()"
+      input: "Receives ( int $post_id, string $content_html ), returns string job_id"
+    balanced: true
+
+  contract_02:
+    name: "Async process_job → Post Builder (rescue branch)"
+    debit:
+      producer: "ConsensusPress_Async::process_job() rescue branch"
+      output: "Calls ConsensusPress_Post_Builder::create_draft( array $api_data, 'rescue' )"
+    credit:
+      consumer: "ConsensusPress_Post_Builder::create_draft()"
+      input: "Receives api_data (same shape as create) + mode='rescue'. Returns array{success, post_id, edit_url, message}."
+    balanced: true
+
+  contract_03:
+    name: "process_job rescue branch → original_post_id meta"
+    debit:
+      producer: "ConsensusPress_Async::process_job() rescue branch"
+      output: "update_post_meta( $draft['post_id'], '_consensuspress_original_post_id', $job_data['post_id'] )"
+    credit:
+      consumer: "admin/views/diff.php"
+      input: "get_post_meta( $post->ID, '_consensuspress_original_post_id', true )"
+    balanced: true
+
+  contract_04:
+    name: "Rescue JS poll → poll handler"
+    debit:
+      producer: "consensuspress-rescue.js poll()"
+      output: "POST admin-ajax.php action=consensuspress_poll_rescue_job, job_id, nonce"
+    credit:
+      consumer: "consensuspress_ajax_poll_rescue_job()"
+      input: "Receives job_id + nonce. Returns status array from get_job_status()."
+    balanced: true
+
+  contract_05:
+    name: "ConsensusPress_Rescue::get_published_posts() → rescue.php dropdown"
+    debit:
+      producer: "ConsensusPress_Rescue::get_published_posts()"
+      output: "array<int, string> post_id => post_title"
+    credit:
+      consumer: "admin/views/rescue.php"
+      input: "$posts = $rescue->get_published_posts(); foreach loop builds <option> elements."
+    balanced: true
+
+  contract_06:
+    name: "ConsensusPress_Async::schedule_rescue_job() job_data structure"
+    debit:
+      producer: "schedule_rescue_job()"
+      output: |
+        set_transient with job_data = array(
+          'status'       => 'pending',
+          'mode'         => 'rescue',
+          'post_id'      => int,
+          'content_html' => string,
+        )
+    credit:
+      consumer: "process_job() rescue branch"
+      input: |
+        Reads $job_data['mode'] === 'rescue'
+        Reads $job_data['content_html'] as API query
+        Reads $job_data['post_id'] for meta storage
+    balanced: true
+
+# =============================================================================
+# D4: FILE MANIFEST
+# =============================================================================
+d4_file_manifest:
+
+  new_files:
+    - path: "plugin/consensuspress/includes/class-consensuspress-rescue.php"
+      version: "1.0.0"
+      lines_est: 120
+    - path: "plugin/consensuspress/admin/views/rescue.php"
+      version: "1.0.0"
+      lines_est: 60
+    - path: "plugin/consensuspress/admin/views/diff.php"
+      version: "1.0.0"
+      lines_est: 55
+    - path: "plugin/consensuspress/admin/js/consensuspress-rescue.js"
+      version: "1.0.0"
+      lines_est: 95
+    - path: "tests/test-rescue.php"
+      version: "1.0.0"
+      lines_est: 130
+    - path: "tests/test-diff.php"
+      version: "1.0.0"
+      lines_est: 70
+
+  modified_files:
+    - path: "plugin/consensuspress/consensuspress.php"
+      from_version: "1.2.0"
+      to_version: "1.3.0"
+      lines_added_est: 40
+    - path: "plugin/consensuspress/includes/class-consensuspress-async.php"
+      from_version: "1.0.0"
+      to_version: "1.1.0"
+      lines_added_est: 45
+    - path: "plugin/consensuspress/admin/css/consensuspress-admin.css"
+      from_version: "1.2.0"
+      to_version: "1.3.0"
+      lines_added_est: 50
+    - path: "tests/bootstrap.php"
+      from_version: "1.2.0"
+      to_version: "1.3.0"
+      lines_added_est: 20
+
+  total_new_files: 6
+  total_modified_files: 4
+  estimated_total_new_loc: ~615
+
+# =============================================================================
+# D5: TEST SCENARIOS
+# =============================================================================
+d5_test_scenarios:
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-rescue.php (NEW — 8 tests)
+  # ---------------------------------------------------------------------------
+  test_rescue:
+    class: "ConsensusPress_Rescue_"
+    fixture_used: "FIXTURE_RESCUE_SUCCESS (same shape as FIXTURE_CREATE_SUCCESS, mode='rescue')"
+
+    tests:
+
+      test_get_published_posts_returns_array:
+        purpose: "get_published_posts() returns associative array of post_id => title"
+        setup: "Seed $GLOBALS['_cp_mock_posts'] with 2 WP_Post stubs"
+        assertion: "assertIsArray + assertArrayHasKey for each post ID"
+
+      test_extract_post_content_happy_path:
+        purpose: "extract_post_content() returns sanitised content for valid published post"
+        setup: "_cp_post_override with post_status='publish', content='<p>Hello</p>'"
+        assertion: "assertStringContainsString( '<p>Hello</p>', $result )"
+
+      test_extract_post_content_not_published:
+        purpose: "Returns empty string for draft or private posts"
+        setup: "_cp_post_override with post_status='draft'"
+        assertion: "assertSame( '', $result )"
+
+      test_extract_post_content_not_found:
+        purpose: "Returns empty string when post_id does not exist"
+        setup: "_cp_post_override = null"
+        assertion: "assertSame( '', $result )"
+
+      test_extract_content_truncated_at_50000:
+        purpose: "Content exceeding 50,000 chars is truncated"
+        setup: "str_repeat( 'x', 60000 ) as post_content"
+        assertion: "assertSame( 50000, strlen( $result ) )"
+
+      test_ajax_rescue_post_happy_path:
+        purpose: "AJAX handler returns job_id on success"
+        setup: |
+          $_POST = array( 'post_id' => 1, 'nonce' => 'test' )
+          Seed valid api_key in options
+          Seed mock post with publish status + content
+        assertion: |
+          assertSame( true, $GLOBALS['_cp_json_response']['success'] )
+          assertArrayHasKey( 'job_id', $GLOBALS['_cp_json_response']['data'] )
+
+      test_ajax_rescue_post_empty_content:
+        purpose: "Returns error when post has no extractable content"
+        setup: "Post exists but content is empty after extraction"
+        assertion: |
+          assertSame( false, $GLOBALS['_cp_json_response']['success'] )
+          assertStringContainsString( 'content', $GLOBALS['_cp_json_response']['data']['message'] )
+
+      test_ajax_rescue_post_no_api_key:
+        purpose: "Returns error when API key not configured"
+        setup: "Valid post but api_key = '' in options"
+        assertion: "assertSame( false, $GLOBALS['_cp_json_response']['success'] )"
+
+  # ---------------------------------------------------------------------------
+  # FILE: tests/test-diff.php (NEW — 4 tests)
+  # ---------------------------------------------------------------------------
+  test_diff:
+    class: "ConsensusPress_Diff_"
+
+    tests:
+
+      test_diff_view_not_shown_without_original_post_id:
+        purpose: "diff.php renders empty state when _consensuspress_original_post_id not set"
+        setup: "_cp_post_meta_override = array() (no original_post_id)"
+        assertion: "assertStringNotContainsString( 'cp-diff-viewer', $output )"
+
+      test_diff_view_shown_with_original_post_id:
+        purpose: "diff.php renders two panes when _consensuspress_original_post_id is set"
+        setup: |
+          _cp_post_meta_override['_consensuspress_original_post_id'] = 42
+          _cp_post_override for post_id=42 with content='<p>Original</p>'
+        assertion: |
+          assertStringContainsString( 'cp-diff-pane', $output )
+          assertStringContainsString( 'Original', $output )
+
+      test_original_post_id_stored_on_rescued_draft:
+        purpose: "process_job() rescue branch stores _consensuspress_original_post_id"
+        setup: |
+          Seed rescue job via schedule_rescue_job( 42, '<p>content</p>' )
+          Seed FIXTURE_RESCUE_SUCCESS as mock API response
+        assertion: |
+          assertSame( 42, $GLOBALS['_cp_post_meta'][$post_id]['_consensuspress_original_post_id'] )
+
+      test_schedule_rescue_job_returns_uuid:
+        purpose: "schedule_rescue_job() returns a non-empty string UUID"
+        setup: "Standard bootstrap"
+        assertion: |
+          $job_id = $async->schedule_rescue_job( 1, '<p>test</p>' );
+          assertIsString( $job_id );
+          assertNotEmpty( $job_id );
+
+  total_new_tests: 12
+  total_tests_after_sprint_4: 46
+
+# =============================================================================
+# D6: MOCK DATA AND STUB REQUIREMENTS
+# =============================================================================
+d6_mock_data:
+
+  fixture_rescue_success:
+    note: "Same shape as FIXTURE_CREATE_SUCCESS. Mode difference is server-side only."
+    source: "consensuspress_mock_api.yaml::fixture_rescue_success"
+    used_by:
+      - "test-rescue.php::test_ajax_rescue_post_happy_path"
+      - "test-diff.php::test_original_post_id_stored_on_rescued_draft"
+
+  new_bootstrap_stubs_required:
+    note: "Extend tests/bootstrap.php (v1.2.0 → v1.3.0)"
+
+    stubs:
+      - name: "get_post( int $post_id )"
+        behaviour: |
+          Returns $GLOBALS['_cp_post_override'][$post_id] if set,
+          otherwise returns null.
+          _cp_post_override is a WP_Post stub array or null per test.
+        reset_in: "cp_test_reset_globals()"
+
+      - name: "get_posts( array $args )"
+        behaviour: |
+          Returns $GLOBALS['_cp_mock_posts'] if set, otherwise array().
+          Allows test control of the post selector dropdown.
+        reset_in: "cp_test_reset_globals()"
+
+      - name: "strip_shortcodes( string $content )"
+        behaviour: "Returns content unchanged (no shortcodes in test fixtures)"
+
+      - name: "get_the_content()"
+        behaviour: "Returns $GLOBALS['_cp_current_post_content'] ?? ''"
+
+      - name: "WP_Post stub class"
+        note: "Already added in Sprint 3 bootstrap. Verify it has ID, post_title, post_content, post_status properties."
+
+    cp_test_reset_globals_additions:
+      - "_cp_post_override     = array()"
+      - "_cp_mock_posts        = array()"
+      - "_cp_current_post_content = ''"
+
+# =============================================================================
+# D7: ACCEPTANCE GATES
+# =============================================================================
+d7_acceptance_gates:
+
+  gate_01_tests:
+    description: "All 46 tests pass, zero failures"
+    command: "phpunit --bootstrap tests/bootstrap.php --testdox"
+    pass_criteria: "OK (46 tests, N assertions)"
+
+  gate_02_regression:
+    description: "All 34 Sprint 1-3 tests preserved — zero regressions"
+    pass_criteria: "Sprint 1 (11) + Sprint 2 (9) + Sprint 3 (14) = 34 unchanged"
+
+  gate_03_hal_scan:
+    description: "Zero HAL-001 through HAL-008 markers in new/modified PHP files"
+    files_scanned:
+      - "includes/class-consensuspress-rescue.php"
+      - "includes/class-consensuspress-async.php"
+      - "admin/views/rescue.php"
+      - "admin/views/diff.php"
+      - "consensuspress.php"
+
+  gate_04_wp_compliance:
+    description: "WordPress.org compliance on all new/modified PHP"
+    checks:
+      - "All user inputs: absint(), sanitize_text_field(), wp_kses_post()"
+      - "All outputs: esc_html(), esc_attr(), wp_kses_post()"
+      - "All AJAX handlers: check_ajax_referer() + current_user_can()"
+      - "No inline JS or CSS in PHP templates"
+      - "ABSPATH guard on all PHP files"
+      - "DNA header on all files"
+
+  gate_05_contracts_balanced:
+    description: "All 6 D3 contracts verified balanced before delivery"
+    pass_criteria: "C-C manually traces each debit to its credit"
+
+  gate_06_create_mode_smoke:
+    description: "Create mode async flow unaffected — schedule_job() still works"
+    pass_criteria: |
+      test_process_job_happy_path still passes.
+      test_schedule_job_returns_uuid still passes.
+
+# =============================================================================
+# BLOCKERS
+# =============================================================================
+blockers:
+
+  active:
+    - id: "B-01-01"
+      description: "POST /api/v1/consensus endpoint not built on Railway"
+      impact: "Plugin works against mock API only. Sprint 4 unaffected — still uses mock."
+      owner: "Mohan — server side"
+
+  cleared_this_sprint: []
+
+# =============================================================================
+# DECISIONS
+# =============================================================================
+decisions:
+
+  - id: "D-04-01"
+    decision: "Rescue creates a NEW draft — original post is never modified"
+    rationale: |
+      Non-destructive by design. User reviews diff before deciding to publish
+      rescued version. Original remains published and intact.
+    reversible: false
+
+  - id: "D-04-02"
+    decision: "Content truncated at 50,000 chars before API submission"
+    rationale: |
+      Matches consensuspress_mock_api.yaml semantic contract definition.
+      Prevents oversized API payloads. 50k chars covers ~7,000 words — more
+      than any realistic blog post.
+    reversible: true
+
+  - id: "D-04-03"
+    decision: "Diff viewer is pure PHP side-by-side, no JS diff library"
+    rationale: |
+      No additional dependencies. WordPress.org reviewers flag external
+      library inclusions. The visual comparison (original pane vs rescued pane)
+      is sufficient for user decision-making without character-level diff highlighting.
+    reversible: true
+
+  - id: "D-04-04"
+    decision: "schedule_rescue_job() added to ConsensusPress_Async, not a new class"
+    rationale: |
+      Rescue and Create share the same job lifecycle (pending → processing →
+      complete/failed). Same transient structure, same CRON_HOOK, same
+      get_job_status() polling. Separate class would duplicate infrastructure.
+    reversible: false
+
+  - id: "D-04-05"
+    decision: "Rescue poll uses a SEPARATE nonce action from Create poll"
+    rationale: |
+      consensuspress_poll_job vs consensuspress_poll_rescue_job.
+      Separate nonces prevent cross-action forgery. Consistent with how
+      Create and Test Connection already use distinct nonce actions.
+    reversible: false

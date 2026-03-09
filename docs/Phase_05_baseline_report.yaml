@@ -1,0 +1,240 @@
+# =============================================================================
+# PHASE 0.5: FOUR ILLS BASELINE — Sprint 1 Codebase
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Session:  03 (continued)
+# Date:     2026-02-28
+# Scanner:  hal001_php_scanner v1.0.0, wp_compliance_scanner v1.0.0,
+#           inventory_php v1.0.0
+# Source:   Sprint 1 codebase (13 files, Session 02 delivery)
+# =============================================================================
+
+# =============================================================================
+# EXECUTIVE SUMMARY
+# =============================================================================
+summary:
+  verdict: "SPRINT 1 IS CLEANER THAN EXPECTED"
+  hal001_real_violations: 3
+  hal001_root_cause: 1  # Single interface contract cascades to 2 implementations
+  wp_compliance_real_violations: 0  # All 9 flags are false positives
+  wp_scanner_refinement_needed: true
+  inventory_callables: 20
+  remediation_effort: "MINIMAL — one PHPDoc shape fix resolves all HAL-001"
+
+# =============================================================================
+# SCAN 1: HAL-001 TYPE ERASURE
+# =============================================================================
+hal001_scan:
+  command: "php hal001_php_scanner.php sprint1/"
+  exit_code: 1
+  files_scanned: 5  # production PHP files
+  violations_found: 2  # production only
+  test_violations: 1  # mock transport (same root cause)
+
+  violations:
+
+    - id: "HAL-001-V1"
+      file: "includes/class-consensuspress-api.php"
+      line: 37
+      class: "ConsensusPress_Transport_Interface"
+      method: "post()"
+      type: "bare_array_param"
+      detail: "$args is bare 'array' without PHPDoc shape"
+      root_cause: true  # THIS is the origin — interface defines the contract
+
+    - id: "HAL-001-V2"
+      file: "includes/class-consensuspress-api.php"
+      line: 54
+      class: "ConsensusPress_WP_Transport"
+      method: "post()"
+      type: "bare_array_param"
+      detail: "$args is bare 'array' without PHPDoc shape"
+      root_cause: false  # Cascades from interface
+
+    - id: "HAL-001-V3"
+      file: "tests/class-consensuspress-mock-transport.php"
+      line: 77
+      class: "ConsensusPress_Mock_Transport"
+      method: "post()"
+      type: "bare_array_param"
+      detail: "$args is bare 'array' without PHPDoc shape"
+      root_cause: false  # Cascades from interface
+
+  clean_files:
+    - "consensuspress.php (4 functions, all clean)"
+    - "includes/class-consensuspress-settings.php (10 methods, all clean)"
+    - "admin/views/settings.php (template, no functions)"
+    - "uninstall.php (procedural, no functions)"
+    - "tests/bootstrap.php (stubs, clean)"
+    - "tests/test-api-client.php (test class, clean)"
+    - "tests/test-settings.php (test class, clean)"
+
+  what_scanner_correctly_passed:
+    - "query() return ': array' — has PHPDoc @return array{success: bool, ...}"
+    - "test_connection() return ': array' — has PHPDoc @return array{success: bool, message: string}"
+    - "get_usage() return ': array' — has PHPDoc @return array{used: int, limit: int, tier: string}"
+
+  known_depth_limitation: |
+    Scanner checks one level deep. The 'data' field in query() return is typed
+    as 'array|null' — nested keys (consensus_score, champion, synthesis, etc.)
+    are NOT shape-typed. This is a P2 enhancement for the scanner AND a D1
+    design improvement for Sprint 2+.
+
+  remediation:
+    fix_count: 1  # One PHPDoc shape addition
+    fix_location: "ConsensusPress_Transport_Interface::post() PHPDoc"
+    fix_content: |
+      /**
+       * Send HTTP POST request.
+       *
+       * @param string $url  Endpoint URL.
+       * @param array  $args {
+       *     wp_remote_post compatible arguments.
+       *
+       *     @type int    $timeout  Request timeout in seconds.
+       *     @type array  $headers  HTTP headers (Content-Type, Authorization).
+       *     @type string $body     JSON-encoded request body.
+       * }
+       * @return array|WP_Error Response array or WP_Error on failure.
+       */
+    cascade_effect: "WP_Transport and Mock_Transport PHPDocs updated to match"
+
+# =============================================================================
+# SCAN 2: WORDPRESS COMPLIANCE
+# =============================================================================
+wp_compliance_scan:
+  command: "php wp_compliance_scanner.php sprint1/"
+  exit_code: 1
+  files_scanned: 9
+  violations_flagged: 9
+  real_violations: 0  # ALL are false positives
+
+  false_positive_analysis:
+
+    - type: "HAL-WP-006 ABSPATH"
+      files_flagged: 8
+      reason: "Scanner checks line 1 only; DNA headers push ABSPATH guard to L13-L17"
+      evidence:
+        - "class-consensuspress-api.php: ABSPATH check at L16 ✓"
+        - "class-consensuspress-settings.php: ABSPATH check at L13 ✓"
+        - "admin/views/settings.php: ABSPATH check at L15 ✓"
+        - "uninstall.php: WP_UNINSTALL_PLUGIN check at L14 ✓ (correct WP pattern)"
+      test_files: "bootstrap.php, mock-transport.php, test-api-client.php, test-settings.php — test files don't need ABSPATH guards"
+
+    - type: "HAL-WP-005 inline script"
+      file: "tests/test-settings.php:62"
+      reason: "String 'malicious<script>' in sanitization test assertion"
+      evidence: "$settings->sanitize_post_status( 'malicious<script>' )"
+
+  scanner_refinements_needed:
+    - id: "WP-FIX-1"
+      priority: "P1"
+      description: "Expand ABSPATH search to first 30 lines (not just L1)"
+    - id: "WP-FIX-2"
+      priority: "P1"
+      description: "Recognize WP_UNINSTALL_PLUGIN as valid alternative to ABSPATH"
+    - id: "WP-FIX-3"
+      priority: "P2"
+      description: "Exclude test directories via --exclude-tests flag"
+    - id: "WP-FIX-4"
+      priority: "P2"
+      description: "Detect <script> inside string literals vs actual inline scripts"
+    - id: "WP-FIX-5"
+      priority: "P2"
+      description: "Fix recursive directory scan when path passed as relative"
+
+# =============================================================================
+# SCAN 3: FUNCTION INVENTORY (D0 PRESERVATION CONTRACTS)
+# =============================================================================
+inventory_scan:
+  total_callables: 20
+  files_inventoried: 3  # production PHP with functions/methods
+
+  consensuspress_php:
+    sha256: "98931a6bdadde982abc733536d3cda581d5e4df838c3bb033196a85a774ee29e"
+    function_count: 4
+    functions:
+      - { name: "consensuspress_activate",               kind: "function", sig: "81f6c2f7" }
+      - { name: "consensuspress_deactivate",              kind: "function", sig: "42c266af" }
+      - { name: "consensuspress_init",                    kind: "function", sig: "4796b785" }
+      - { name: "consensuspress_ajax_test_connection",    kind: "function", sig: "97f77fa7" }
+
+  class_consensuspress_api_php:
+    sha256: "25cb2a7d00beb94585aa6e4b57bb6429a8901352cc4de2bf2e9fcda1349f65bd"
+    function_count: 6
+    functions:
+      - { name: "post",            kind: "interface_method", class: "ConsensusPress_Transport_Interface", sig: "9ff03bf6" }
+      - { name: "post",            kind: "method",           class: "ConsensusPress_WP_Transport",       sig: "9ff03bf6" }
+      - { name: "__construct",     kind: "method",           class: "ConsensusPress_API",                sig: "211b2b5b" }
+      - { name: "query",           kind: "method",           class: "ConsensusPress_API",                sig: "b21289bd" }
+      - { name: "test_connection", kind: "method",           class: "ConsensusPress_API",                sig: "a26da5fb" }
+      - { name: "get_usage",       kind: "method",           class: "ConsensusPress_API",                sig: "d6ddcb1e" }
+
+  class_consensuspress_settings_php:
+    sha256: "9fb40890b76dd1132c5e4f8552f1d6b7799499517d58982e95388d6d4713bd69"
+    function_count: 10
+    functions:
+      - { name: "init",                          kind: "method", class: "ConsensusPress_Settings", sig: "52487535" }
+      - { name: "add_admin_menu",                kind: "method", class: "ConsensusPress_Settings", sig: "87995baa" }
+      - { name: "register_settings",             kind: "method", class: "ConsensusPress_Settings", sig: "7fda9a84" }
+      - { name: "sanitize_post_status",          kind: "method", class: "ConsensusPress_Settings", sig: "c71d7b0b" }
+      - { name: "enqueue_admin_assets",          kind: "method", class: "ConsensusPress_Settings", sig: "3fa00735" }
+      - { name: "render_settings_page",          kind: "method", class: "ConsensusPress_Settings", sig: "ece5f019" }
+      - { name: "render_api_key_field",          kind: "method", class: "ConsensusPress_Settings", sig: "7705f13a" }
+      - { name: "render_default_category_field", kind: "method", class: "ConsensusPress_Settings", sig: "b18ce7b7" }
+      - { name: "render_default_status_field",   kind: "method", class: "ConsensusPress_Settings", sig: "e5feba57" }
+      - { name: "render_notification_email_field", kind: "method", class: "ConsensusPress_Settings", sig: "90831922" }
+
+# =============================================================================
+# REMEDIATION PLAN
+# =============================================================================
+remediation:
+
+  sprint1_fixes:
+    cci_ref: "CCI-CP-03-01 (to be created)"
+    effort: "MINIMAL"
+    items:
+      - id: "FIX-HAL001-01"
+        description: "Add PHPDoc @param shape to Transport_Interface::post() $args"
+        files_affected:
+          - "includes/class-consensuspress-api.php (interface + WP_Transport)"
+          - "tests/class-consensuspress-mock-transport.php (Mock_Transport)"
+        lines_changed: "~6 (3 PHPDoc blocks, 2 lines each)"
+        risk: "ZERO — PHPDoc-only change, no runtime behaviour change"
+        d0_preservation: "All 20 callables preserved, signature hashes unchanged"
+
+  scanner_fixes:
+    effort: "MODERATE"
+    items:
+      - id: "FIX-WP-SCANNER-01"
+        description: "Fix ABSPATH detection to scan first 30 lines"
+        priority: "P1 — required before Sprint 2 enforcement"
+      - id: "FIX-WP-SCANNER-02"
+        description: "Recognize WP_UNINSTALL_PLUGIN as valid"
+        priority: "P1"
+      - id: "FIX-WP-SCANNER-03"
+        description: "Add --exclude-tests flag"
+        priority: "P2 — before Sprint 2"
+      - id: "FIX-WP-SCANNER-04"
+        description: "String literal awareness for <script> detection"
+        priority: "P2"
+      - id: "FIX-HAL001-SCANNER-01"
+        description: "Fix recursive directory scan (trailing path bug)"
+        priority: "P1"
+
+# =============================================================================
+# NEXT STEPS
+# =============================================================================
+next_steps:
+  immediate:
+    - "Create CCI-CP-03-01 for PHPDoc shape fix (FIX-HAL001-01)"
+    - "Fix scanner bugs (P1 items only: ABSPATH range, WP_UNINSTALL_PLUGIN, dir recursion)"
+    - "Re-run all scanners to verify clean baseline"
+  then:
+    - "Sprint 2 operates under full machine-enforced AFD"
+    - "Every CCI includes machine-generated D0 from inventory_php.php"
+    - "hal001 + wp_compliance gates block delivery if violations found"
+
+# =============================================================================
+# END OF BASELINE REPORT
+# =============================================================================

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    DNA Header
+    File:         tests/phpunit.xml
+    Version:      1.2.0
+    Purpose:      PHPUnit 9 test suite configuration — ConsensusPress
+    Author:       D-C (Session 10) — BUG-10-01 fix
+    Fix:          Replaced <directory> with explicit <file> entries.
+                  PHPUnit 9 default directory suffix is *Test.php — silently
+                  skips test-*.php files. Explicit <file> entries bypass
+                  suffix-based discovery entirely.
+    PHP Version:  8.3+ (PHPUnit 9.6.17)
+    Sprint:       Hotfix — resolves OPEN-09-01 "No tests executed"
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="../vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="bootstrap.php"
+         colors="true"
+         verbose="true">
+  <testsuites>
+    <testsuite name="ConsensusPress">
+      <!-- Sprint 1 -->
+      <file>test-settings.php</file>
+      <file>test-api-client.php</file>
+      <!-- Sprint 2 -->
+      <file>test-post-builder.php</file>
+      <file>test-create.php</file>
+      <!-- Sprint 3 -->
+      <file>test-async.php</file>
+      <file>test-meta-box.php</file>
+      <!-- Sprint 4 -->
+      <file>test-rescue.php</file>
+      <file>test-diff.php</file>
+      <!-- Sprint 5 -->
+      <file>test-usage.php</file>
+      <!-- Sprint 8 -->
+      <file>test-unsplash.php</file>
+    </testsuite>
+  </testsuites>
+</phpunit>

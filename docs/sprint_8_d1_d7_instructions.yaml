@@ -1,0 +1,903 @@
+# =============================================================================
+# SPRINT 8: WP.ORG PACKAGING + UNSPLASH + HOUSEKEEPING — D1-D7 SPECIFICATION
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Sprint:   8 of 8 (FINAL)
+# Author:   D-C (Session 12)
+# Date:     2026-03-09
+# Method:   AFD v1.4.0 (D8 Semantic Contract Proof + HAL-013 + Spec Ambiguity Probe)
+# HLR ref:  Build Sequence Steps 8 (post-builder image), 10 (WP.org packaging)
+# Version target: 2.1.0
+# =============================================================================
+# SCOPE:
+#   Part A — Unsplash featured image fetch (B-08-01, deferred from Sprint 7)
+#     New method: fetch_unsplash_image() in class-consensuspress-post-builder.php
+#     New setting: consensuspress_unsplash_key stored in wp_options
+#     Settings page: new Unsplash API key field
+#     Graceful degradation: post created without image if fetch fails
+#
+#   Part B — PHP 8.5 deprecation housekeeping (OPEN-11-02)
+#     Fix 1: float→int cast in class-consensuspress-meta-box.php line 90
+#     Fix 2: ReflectionMethod::setAccessible() in tests/test-meta-box.php (3 occurrences)
+#
+#   Part C — WordPress.org packaging
+#     readme.txt (WP.org required format)
+#     assets/: banner-772x250.png placeholder, icon-256x256.png placeholder
+#     GPL v2+ licence audit across all PHP files
+#     deploy_to_wp_org.sh: PHPUnit gate + scanner gates + SVN structure prep
+#
+# ARCHITECTURE DECISIONS (locked before spec):
+#   D-12-01: Unsplash fetch happens in post-builder PHP, not Railway server.
+#            Thin-client principle: all WP operations stay in plugin.
+#   D-12-02: Unsplash API key stored as separate wp_options key: consensuspress_unsplash_key
+#            Separate from consensuspress_api_key (Bearer session token).
+#   D-12-03: Unsplash fetch uses Unsplash random photo endpoint:
+#            GET https://api.unsplash.com/photos/random?query={keyword}&orientation=landscape&client_id={key}
+#   D-12-04: Graceful degradation on Unsplash failure — post created without image.
+#            sideload_featured_image() already handles empty array gracefully.
+#   D-12-05: deploy_to_wp_org.sh gates: PHPUnit (62+) → HAL-001 scanner → WP compliance → SVN prep.
+#   D-12-06: ReflectionMethod::setAccessible() fix: replace with Closure::bind() pattern.
+#            Does not affect test logic — only test infrastructure.
+#
+# OUT OF SCOPE:
+#   Stripe integration (post-revenue)
+#   Option B (CP calls Seekrates directly — post WP.org submission)
+#   Option C (standalone Railway service — post-revenue)
+#   WordPress.org SVN commit (manual Mohan action after deploy_to_wp_org.sh passes)
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# D0: PRESERVATION CONTRACTS — DO NOT BREAK
+# =============================================================================
+# All 62 existing tests must pass after Sprint 8.
+# Sprint 8 adds ~8 new tests. Target: 70+ green.
+# =============================================================================
+d0_preservation:
+  rule: "All 62 existing tests preserved. Zero regressions permitted."
+
+  files_modified_by_sprint_8:
+
+    - file: "plugin/consensuspress/consensuspress.php"
+      current_version: "2.0.0"
+      new_version: "2.1.0"
+      modification: |
+        ADD consensuspress_unsplash_key to default options in consensuspress_activate().
+        ADD register_setting call for consensuspress_unsplash_key in ConsensusPress_Settings.
+        NO other changes to main plugin file.
+      preserved_functions:
+        - consensuspress_activate
+        - consensuspress_deactivate
+        - consensuspress_init
+        - consensuspress_ajax_test_connection
+        - consensuspress_ajax_create_post
+        - consensuspress_ajax_poll_job
+        - consensuspress_ajax_rescue_post
+        - consensuspress_ajax_poll_rescue_job
+
+    - file: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+      current_version: "2.0.0"
+      new_version: "2.1.0"
+      modification: |
+        ADD private method: fetch_unsplash_image( string $keyword ): array
+        MODIFY create_draft(): after building SEO metadata, call fetch_unsplash_image()
+          and pass result to existing sideload_featured_image().
+        NO changes to any other method. Public create_draft() signature UNCHANGED.
+      preserved_methods:
+        - create_draft()           # signature frozen — callers unaffected
+        - build_post_array()
+        - build_content_html()
+        - inject_rank_math_meta()
+        - inject_consensus_meta()
+        - inject_schema_meta()
+        - sideload_featured_image()  # signature unchanged — now called with real data
+        - generate_seo_metadata()
+        - generate_content_pipeline()
+        - generate_faq_schema()
+        - generate_article_schema()
+        - extract_paragraphs()
+        - extract_insights()
+        - get_champion_answer()
+        - convert_plain_to_html_paragraphs()
+        - get_score_class()
+
+    - file: "plugin/consensuspress/includes/class-consensuspress-settings.php"
+      current_version: "1.0.0"
+      new_version: "1.1.0"
+      modification: |
+        ADD Unsplash API key field to settings page.
+        ADD register_setting for consensuspress_unsplash_key.
+        ADD sanitize callback: sanitize_text_field.
+        NO changes to existing API key field or other settings.
+      preserved_methods:
+        - init()
+        - render_settings_page()
+        - register_settings()
+        - render_api_key_field()
+        - render_post_status_field()
+        - sanitize_api_key()
+
+    - file: "plugin/consensuspress/includes/class-consensuspress-meta-box.php"
+      current_version: "1.1.0"
+      new_version: "1.1.1"
+      modification: |
+        FIX OPEN-11-02: Replace implicit float→int cast on line 90 with explicit (int) cast.
+        NO logic changes. One character fix.
+      preserved_methods:
+        - init()
+        - add_meta_boxes()
+        - render_meta_box()
+        - get_score_class()      # this method was confirmed present
+
+    - file: "tests/test-meta-box.php"
+      current_version: "1.1.0"
+      new_version: "1.2.0"
+      modification: |
+        FIX OPEN-11-02: Replace all 3 ReflectionMethod::setAccessible(true) calls
+        with Closure::bind() pattern (PHP 8.1+ compatible).
+        NO test logic changes. Same assertions, same outcomes.
+
+  files_unchanged:
+    - "tests/bootstrap.php"
+    - "tests/test-api-client.php"
+    - "tests/test-async.php"
+    - "tests/test-create.php"
+    - "tests/test-diff.php"
+    - "tests/test-post-builder.php"
+    - "tests/test-rescue.php"
+    - "tests/test-settings.php"
+    - "tests/test-usage.php"
+    - "plugin/consensuspress/includes/class-consensuspress-api.php"
+    - "plugin/consensuspress/includes/class-consensuspress-async.php"
+    - "plugin/consensuspress/includes/class-consensuspress-rescue.php"
+    - "plugin/consensuspress/includes/class-consensuspress-usage.php"
+
+  new_files:
+    - "plugin/consensuspress/readme.txt"
+    - "plugin/consensuspress/assets/README.txt  (placeholder instructions for banner/icon)"
+    - "deploy_to_wp_org.sh"
+    - "tests/test-unsplash.php  (8 new tests)"
+
+# =============================================================================
+# D1: TYPE CONTRACTS
+# =============================================================================
+d1_type_contracts:
+
+  semantic_vocabulary:
+    unsplash_key:    "string — Unsplash API Access Key stored in wp_options as consensuspress_unsplash_key"
+    unsplash_image:  "array{url: string, alt_text: string, attribution: string} — or empty array on failure"
+    keyword:         "string — focus keyword extracted from SEO metadata, used as Unsplash search query"
+    unsplash_photo:  "array — decoded JSON from Unsplash API response body"
+
+  php_type_shapes:
+
+    UnsplashImageShape:
+      description: "Return shape of fetch_unsplash_image(). Empty array = no image (graceful degrade)."
+      fields:
+        url:          "string — https://images.unsplash.com/... (esc_url_raw applied)"
+        alt_text:     "string — photo description from Unsplash JSON (sanitize_text_field applied)"
+        attribution:  "string — 'Photo by {name} on Unsplash' (sanitize_text_field applied)"
+      empty_state:    "array() — returned on any failure (no key, API error, WP_Error)"
+
+    UnsplashApiResponse:
+      description: "Decoded JSON from GET /photos/random. Only fields we consume are listed."
+      consumed_fields:
+        urls.regular:           "string — image URL (1080px wide)"
+        alt_description:        "string — auto-generated alt text"
+        user.name:              "string — photographer display name"
+        user.links.html:        "string — photographer profile URL (for attribution link)"
+
+  deferral_register:
+    TYPE-B-01:
+      field: "fetch_unsplash_image() return — bare array with string keys"
+      reason: "Not a Pydantic boundary. PHP. Consumed only by sideload_featured_image() in same class."
+      risk: "None — producer and consumer in same file. Shape documented above."
+
+# =============================================================================
+# D2: OUTPUT/INPUT CONTRACTS (DOUBLE-ENTRY)
+# =============================================================================
+d2_contracts:
+
+  contract_unsplash_fetch:
+    id: "C8-01"
+    debit:
+      producer: "ConsensusPress_Post_Builder::fetch_unsplash_image()"
+      output: "array{url, alt_text, attribution} or array()"
+    credit:
+      consumer: "ConsensusPress_Post_Builder::sideload_featured_image()"
+      input: "$featured_image array — url, alt_text, attribution keys"
+    balance: "BALANCED — both in class-consensuspress-post-builder.php"
+
+  contract_unsplash_key_storage:
+    id: "C8-02"
+    debit:
+      producer: "ConsensusPress_Settings — register_setting + sanitize"
+      output: "wp_options key: consensuspress_unsplash_key (string)"
+    credit:
+      consumer: "ConsensusPress_Post_Builder::fetch_unsplash_image()"
+      input: "get_option('consensuspress_unsplash_key', '')"
+    balance: "BALANCED — wp_options is the shared contract boundary"
+
+  contract_unsplash_key_activation:
+    id: "C8-03"
+    debit:
+      producer: "consensuspress_activate() — add_option default"
+      output: "consensuspress_unsplash_key = '' (empty string default)"
+    credit:
+      consumer: "ConsensusPress_Settings::render_settings_page() — reads for display"
+      input: "get_option('consensuspress_unsplash_key', '')"
+    balance: "BALANCED"
+
+  contract_phpunit_gate:
+    id: "C8-04"
+    debit:
+      producer: "tests/test-unsplash.php — 8 test methods"
+      output: "8 assertions against fetch_unsplash_image() and settings integration"
+    credit:
+      consumer: "deploy_to_wp_org.sh — PHPUnit gate step 1"
+      input: "vendor/bin/phpunit — must exit 0"
+    balance: "BALANCED"
+
+  contract_deploy_script:
+    id: "C8-05"
+    debit:
+      producer: "deploy_to_wp_org.sh"
+      output: "Exit 0 only if: PHPUnit green + HAL-001 EXIT 0 + WP compliance EXIT 0"
+    credit:
+      consumer: "Mohan — manual SVN commit to WordPress.org after script passes"
+      input: "Script must exit 0 before SVN commit proceeds"
+    balance: "BALANCED — gate enforced by script"
+
+# =============================================================================
+# D3: FORMAT CONTRACTS
+# =============================================================================
+d3_format_contracts:
+
+  unsplash_api_request:
+    method: "GET"
+    url: "https://api.unsplash.com/photos/random"
+    params:
+      query:       "string — focus_keyword (URL-encoded via add_query_arg)"
+      orientation: "landscape"
+      client_id:   "string — consensuspress_unsplash_key from wp_options"
+    wp_function: "wp_remote_get() with timeout=15"
+    headers:      "none required beyond defaults"
+
+  unsplash_api_response:
+    success_code: 200
+    body_fields_consumed:
+      - "urls.regular        → UnsplashImageShape.url"
+      - "alt_description     → UnsplashImageShape.alt_text (fallback: $keyword)"
+      - "user.name           → UnsplashImageShape.attribution prefix"
+    error_codes:
+      401: "Invalid key — return empty array"
+      403: "Rate limited — return empty array"
+      404: "No photo found — return empty array"
+      any_wp_error: "return empty array"
+
+  readme_txt_format:
+    standard: "WordPress.org readme.txt format v1.0"
+    required_headers:
+      - "=== ConsensusPress by Seekrates ==="
+      - "Contributors: seekratesai"
+      - "Tags: ai content, consensus, seo, llm, content generation"
+      - "Requires at least: 6.2"
+      - "Tested up to: 6.7"
+      - "Requires PHP: 7.4"
+      - "Stable tag: 2.1.0"
+      - "License: GPLv2 or later"
+      - "License URI: https://www.gnu.org/licenses/gpl-2.0.html"
+    required_sections:
+      - "== Description =="
+      - "== Installation =="
+      - "== Frequently Asked Questions =="
+      - "== Screenshots =="
+      - "== Changelog =="
+      - "== Upgrade Notice =="
+
+  deploy_script_gates:
+    gate_1: "vendor/bin/phpunit --configuration tests/phpunit.xml — exit 0 required"
+    gate_2: "php docs/tooling/php-afd/wp_compliance_scanner.php plugin/consensuspress/ — exit 0 required"
+    gate_3: |
+      VERSION CONSISTENCY CHECK — hard exit if mismatch.
+      stable_tag = grep 'Stable tag' plugin/consensuspress/readme.txt
+      plugin_ver = grep 'Version:' plugin/consensuspress/consensuspress.php
+      Both must match exactly. WP.org rejects submissions where these differ.
+    gate_4: "php docs/tooling/php-afd/hal001_php_scanner.php plugin/consensuspress/ — exit 0 required"
+    dry_run_exit: "--dry-run flag exits after Gate 4 with ✅ DRY RUN COMPLETE. All gates passed."
+    gate_5_svn: "SVN commit — only reached without --dry-run and after all gates pass"
+    on_any_failure: "Script exits non-zero with clear message identifying failed gate"
+    on_all_pass: "Prints: ✅ ALL GATES PASSED. Plugin ready for WordPress.org SVN submission."
+
+# =============================================================================
+# D4: FUNCTION SPECIFICATIONS
+# =============================================================================
+d4_function_specs:
+
+  # ---------------------------------------------------------------------------
+  # PART A: fetch_unsplash_image() — new private method in post-builder
+  # ---------------------------------------------------------------------------
+  fetch_unsplash_image:
+    file: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+    signature: "private function fetch_unsplash_image( string $keyword ): array"
+    purpose: |
+      Fetch a relevant image from Unsplash for the post topic.
+      Returns UnsplashImageShape array on success, empty array on any failure.
+      Called in create_draft() after SEO metadata is generated.
+    body_logic: |
+      1. $key = get_option( 'consensuspress_unsplash_key', '' )
+      2. If empty $key → return array()  (no key configured — graceful skip)
+      3. $keyword = sanitize_text_field( $keyword )
+      4. If empty $keyword → return array()
+      5. $url = add_query_arg( array(
+             'query'       => rawurlencode( $keyword ),
+             'orientation' => 'landscape',
+             'client_id'   => $key,
+         ), 'https://api.unsplash.com/photos/random' )
+      6. $response = wp_remote_get( $url, array( 'timeout' => 15 ) )
+      7. if ( is_wp_error( $response ) ) → return array()
+      8. $status = (int) wp_remote_retrieve_response_code( $response )
+      9. if ( 200 !== $status ) → return array()
+      10. $body = json_decode( wp_remote_retrieve_body( $response ), true )
+      11. if ( empty( $body['urls']['regular'] ) ) → return array()
+      12. $photo_url   = esc_url_raw( $body['urls']['regular'] )
+          $alt_text    = sanitize_text_field( $body['alt_description'] ?? $keyword )
+          $author_name = sanitize_text_field( $body['user']['name'] ?? '' )
+          $attribution = $author_name
+              ? 'Photo by ' . $author_name . ' on Unsplash'
+              : 'Photo from Unsplash'
+      13. return array(
+              'url'         => $photo_url,
+              'alt_text'    => $alt_text,
+              'attribution' => sanitize_text_field( $attribution ),
+          )
+    error_handling: "All failures return empty array. Post creation never blocked by image failure."
+    phpdoc: |
+      /**
+       * Fetch a relevant featured image from Unsplash.
+       *
+       * Requires consensuspress_unsplash_key to be set in wp_options.
+       * Returns empty array on any failure — post creation is never blocked.
+       *
+       * @param string $keyword Focus keyword used as Unsplash search query.
+       * @return array{url: string, alt_text: string, attribution: string}|array
+       */
+
+  # ---------------------------------------------------------------------------
+  # PART A: create_draft() modification — call fetch_unsplash_image()
+  # ---------------------------------------------------------------------------
+  create_draft_modification:
+    file: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+    method: "create_draft()"
+    change: "ADDITIVE — one new call, no existing logic changed"
+    insert_location: |
+      After: $seo_metadata = $this->generate_seo_metadata( $api_data )
+      Before: existing sideload_featured_image() call
+    insert_code: |
+      // Sprint 8: Fetch Unsplash image using focus keyword.
+      $featured_image = $this->fetch_unsplash_image(
+          $seo_metadata['focus_keyword'] ?? ''
+      );
+    note: |
+      In Sprint 7, $featured_image was hard-coded to array() (B-08-01 deferral).
+      Sprint 8 replaces that empty array with the result of fetch_unsplash_image().
+      sideload_featured_image() already handles empty array gracefully — no change needed there.
+
+  # ---------------------------------------------------------------------------
+  # PART A: Settings — Unsplash API key field
+  # ---------------------------------------------------------------------------
+  settings_unsplash_field:
+    file: "plugin/consensuspress/includes/class-consensuspress-settings.php"
+    modification: "ADD new field — existing fields unchanged"
+    new_option_key: "consensuspress_unsplash_key"
+    register_setting: |
+      register_setting(
+          'consensuspress_settings',
+          'consensuspress_unsplash_key',
+          array( 'sanitize_callback' => 'sanitize_text_field' )
+      )
+    new_method:
+      render_unsplash_key_field:
+        signature: "public function render_unsplash_key_field(): void"
+        purpose: "Render Unsplash API key input field"
+        body_logic: |
+          $key = get_option( 'consensuspress_unsplash_key', '' );
+          echo '<input type="password" id="consensuspress_unsplash_key"
+                    name="consensuspress_unsplash_key"
+                    value="' . esc_attr( $key ) . '"
+                    class="regular-text" autocomplete="off" />';
+          echo '<p class="description">' .
+               esc_html__( 'Unsplash Access Key for featured image fetch. Leave empty to skip.', 'consensuspress' ) .
+               '</p>';
+        sanitise: "esc_attr() on output, sanitize_text_field() via register_setting callback"
+
+  # ---------------------------------------------------------------------------
+  # PART B: PHP 8.5 housekeeping — meta-box.php
+  # ---------------------------------------------------------------------------
+  meta_box_float_cast_fix:
+    file: "plugin/consensuspress/includes/class-consensuspress-meta-box.php"
+    fix: "OPEN-11-02 Fix 1 — implicit float→int cast"
+    location: "Line 90 (approximately) — score display calculation"
+    before: "/* implicit float-to-int cast generating PHP 8.5 deprecation */"
+    change: "Wrap the float value in explicit (int) cast: (int) round( $score )"
+    note: |
+      Exact line to be confirmed by C-C via grep before patching.
+      Command: grep -n "score" plugin/consensuspress/includes/class-consensuspress-meta-box.php
+
+  test_meta_box_reflection_fix:
+    file: "tests/test-meta-box.php"
+    fix: "OPEN-11-02 Fix 2 — ReflectionMethod::setAccessible() deprecated PHP 8.1+"
+    occurrences: 3
+    pattern_before: |
+      $method = new ReflectionMethod( 'ConsensusPress_Meta_Box', 'method_name' );
+      $method->setAccessible( true );
+      $result = $method->invoke( $instance, ...args );
+    pattern_after: |
+      $closure = Closure::bind( function( ...$args ) {
+          return $this->method_name( ...$args );
+      }, $instance, 'ConsensusPress_Meta_Box' );
+      $result = $closure( ...args );
+    note: |
+      All three occurrences follow identical pattern — same fix applied three times.
+      Test assertions are unchanged. Only invocation mechanism changes.
+      C-C must grep for setAccessible in test-meta-box.php to confirm line numbers.
+
+  # ---------------------------------------------------------------------------
+  # PART C: readme.txt
+  # ---------------------------------------------------------------------------
+  readme_txt:
+    file: "plugin/consensuspress/readme.txt"
+    status: "NEW FILE"
+    content_spec:
+      plugin_name:    "ConsensusPress by Seekrates"
+      contributors:   "seekratesai"
+      tags:           "ai content, consensus, seo, llm, content generation, ai search"
+      requires_at:    "6.2"
+      tested_up_to:   "6.7"
+      requires_php:   "7.4"
+      stable_tag:     "2.1.0"
+      license:        "GPLv2 or later"
+      license_uri:    "https://www.gnu.org/licenses/gpl-2.0.html"
+      short_description: |
+        Generate AI-search resilient WordPress content using 5-LLM consensus validation.
+        Not an AI writer — a cross-model validation engine.
+      description_bullets:
+        - "Query 5 LLMs simultaneously (OpenAI, Claude, Gemini, Mistral, Cohere)"
+        - "Quality scoring and hallucination filtering across all responses"
+        - "Champion selection — best answer surfaces automatically"
+        - "Oracle Risk Analysis — flags low-confidence claims"
+        - "Rank Math SEO integration — focus keyword, meta, schema injected automatically"
+        - "Create Mode: topic → consensus → WordPress draft"
+        - "Rescue Mode: existing post → AI-search restructured → new draft with diff comparison"
+        - "3 free posts per month — no credit card required"
+      installation_steps:
+        - "Upload the consensuspress directory to /wp-content/plugins/"
+        - "Activate the plugin through the Plugins menu in WordPress"
+        - "Navigate to ConsensusPress > Settings"
+        - "Enter your Seekrates AI API key (obtain from app.seekrates-ai.com)"
+        - "Optionally enter your Unsplash Access Key for automatic featured images"
+        - "Click Save Settings — you are ready to create your first AI-consensus post"
+      faq:
+        q1:
+          q: "Is this an AI writing tool?"
+          a: "No. ConsensusPress queries 5 separate LLMs and surfaces consensus across them. The output is validated, hallucination-filtered, and scored — not generated by a single model."
+        q2:
+          q: "Where do I get an API key?"
+          a: "Register at app.seekrates-ai.com. Free tier includes 3 posts per month with no credit card required."
+        q3:
+          q: "Does this modify my existing posts?"
+          a: "Never. Rescue Mode creates a new draft — your original post is never touched."
+        q4:
+          q: "What happens when my monthly limit is reached?"
+          a: "The plugin blocks new requests and shows an upgrade prompt. Your existing posts and data are unaffected."
+      changelog:
+        "2.1.0":
+          - "Added Unsplash featured image fetch"
+          - "WordPress.org initial release"
+          - "PHP 8.5 compatibility fixes"
+        "2.0.0":
+          - "Railway FastAPI endpoint integration"
+          - "PHP content pipeline (post-builder v2.0.0)"
+          - "T&C gate handler"
+        "1.4.0":
+          - "Usage tracking and tier enforcement"
+        "1.3.0":
+          - "Rescue Mode and Diff Viewer"
+        "1.2.0":
+          - "Async processing via WP-Cron and consensus meta box"
+        "1.1.0":
+          - "Create Mode with full SEO and schema injection"
+        "1.0.0":
+          - "Initial release — plugin skeleton, settings, API client"
+
+  # ---------------------------------------------------------------------------
+  # PART C: deploy_to_wp_org.sh
+  # ---------------------------------------------------------------------------
+  deploy_script:
+    file: "deploy_to_wp_org.sh"
+    status: "NEW FILE — at ConsensusPress repo root"
+    shebang: "#!/bin/bash"
+    set_flags: "set -e"
+    dry_run_note: |
+      Supports --dry-run flag. Run as:
+        ./deploy_to_wp_org.sh            → full deploy including SVN commit
+        ./deploy_to_wp_org.sh --dry-run  → all gates, stops before SVN commit
+    structure: |
+      #!/bin/bash
+      set -e
+
+      DRY_RUN=false
+      if [ "${1}" = "--dry-run" ]; then
+        DRY_RUN=true
+        echo "🔍 DRY RUN MODE — gates will run but SVN commit will not."
+        echo ""
+      fi
+
+      # -----------------------------------------------------------------------
+      # Gate 1: PHPUnit
+      # -----------------------------------------------------------------------
+      echo "Gate 1: PHPUnit..."
+      cd plugin/consensuspress
+      vendor/bin/phpunit --configuration ../../tests/phpunit.xml
+      if [ $? -ne 0 ]; then
+        echo "❌ GATE 1 FAILED: PHPUnit tests not green. Aborting."
+        exit 1
+      fi
+      cd ../..
+      echo "✅ Gate 1 passed: PHPUnit"
+
+      # -----------------------------------------------------------------------
+      # Gate 2: WP compliance scanner
+      # -----------------------------------------------------------------------
+      echo "Gate 2: WP compliance scanner..."
+      php docs/tooling/php-afd/wp_compliance_scanner.php plugin/consensuspress/
+      if [ $? -ne 0 ]; then
+        echo "❌ GATE 2 FAILED: WP compliance violations found. Aborting."
+        exit 1
+      fi
+      echo "✅ Gate 2 passed: WP compliance scanner"
+
+      # -----------------------------------------------------------------------
+      # Gate 3: Version consistency check
+      # Stable tag in readme.txt MUST match Version in consensuspress.php header.
+      # WP.org rejects submissions where these differ.
+      # -----------------------------------------------------------------------
+      echo "Gate 3: Version consistency check..."
+      STABLE_TAG=$(grep "Stable tag:" plugin/consensuspress/readme.txt | sed 's/Stable tag: *//' | tr -d '[:space:]')
+      PLUGIN_VER=$(grep "^ \* Version:" plugin/consensuspress/consensuspress.php | sed 's/ \* Version: *//' | tr -d '[:space:]')
+      if [ -z "$STABLE_TAG" ]; then
+        echo "❌ GATE 3 FAILED: Could not read Stable tag from readme.txt. Aborting."
+        exit 1
+      fi
+      if [ -z "$PLUGIN_VER" ]; then
+        echo "❌ GATE 3 FAILED: Could not read Version from consensuspress.php. Aborting."
+        exit 1
+      fi
+      if [ "$STABLE_TAG" != "$PLUGIN_VER" ]; then
+        echo "❌ GATE 3 FAILED: Version mismatch."
+        echo "   readme.txt Stable tag : $STABLE_TAG"
+        echo "   consensuspress.php Ver: $PLUGIN_VER"
+        echo "   These must be identical. Aborting."
+        exit 1
+      fi
+      echo "✅ Gate 3 passed: Version consistency ($STABLE_TAG)"
+
+      # -----------------------------------------------------------------------
+      # Gate 4: HAL-001 PHP scanner (Fracture-Free gate)
+      # -----------------------------------------------------------------------
+      echo "Gate 4: HAL-001 scanner..."
+      php docs/tooling/php-afd/hal001_php_scanner.php plugin/consensuspress/
+      if [ $? -ne 0 ]; then
+        echo "❌ GATE 4 FAILED: HAL-001 violations found. Aborting."
+        exit 1
+      fi
+      echo "✅ Gate 4 passed: HAL-001 scanner"
+
+      echo ""
+      echo "✅ ALL GATES PASSED."
+
+      # -----------------------------------------------------------------------
+      # Dry-run exits here
+      # -----------------------------------------------------------------------
+      if [ "$DRY_RUN" = true ]; then
+        echo "🔍 DRY RUN COMPLETE. Plugin is clean. SVN commit not executed."
+        echo "   Run without --dry-run to proceed with WordPress.org submission."
+        exit 0
+      fi
+
+      # -----------------------------------------------------------------------
+      # Gate 5: SVN commit to WordPress.org
+      # -----------------------------------------------------------------------
+      echo "Gate 5: SVN commit to WordPress.org..."
+      echo "Next step: svn commit to https://plugins.svn.wordpress.org/consensuspress/"
+      echo "(SVN commit is a manual step — script confirms gates passed.)"
+      echo ""
+      echo "✅ Plugin ready for WordPress.org SVN submission."
+    chmod: "chmod +x deploy_to_wp_org.sh"
+    dna_header: "Required — see D6"
+
+# =============================================================================
+# D5: MOCK API — NO CHANGES
+# =============================================================================
+d5_mock_api:
+  status: "NO CHANGES — consensuspress_mock_api.yaml v2.0.0 unchanged"
+  rationale: |
+    Sprint 8 adds Unsplash fetch (external HTTP call — mocked in PHPUnit bootstrap)
+    and WP.org packaging (no API changes). Mock API contract unchanged.
+  unsplash_mock_in_bootstrap: |
+    tests/bootstrap.php already stubs wp_remote_get() via the existing wp_remote_post stub pattern.
+    C-C must verify wp_remote_get() stub exists in bootstrap.php before writing test-unsplash.php.
+    If missing: add stub following same pattern as wp_remote_post stub.
+    Stub signature: wp_remote_get( string $url, array $args = array() ): array|WP_Error
+
+# =============================================================================
+# D6: FILE MANIFEST WITH DNA HEADERS
+# =============================================================================
+d6_manifest:
+
+  new_files:
+
+    - path: "plugin/consensuspress/readme.txt"
+      dna: "N/A — plain text WP.org format, no DNA header required"
+
+    - path: "plugin/consensuspress/assets/README.txt"
+      dna: "N/A — plain text placeholder instructions"
+      content: |
+        Place banner and icon assets here before WordPress.org submission:
+          banner-772x250.png   — Plugin banner (772 x 250 px)
+          banner-1544x500.png  — Plugin banner retina (1544 x 500 px)
+          icon-128x128.png     — Plugin icon (128 x 128 px)
+          icon-256x256.png     — Plugin icon retina (256 x 256 px)
+          screenshot-1.png     — Create Mode admin page
+          screenshot-2.png     — Rescued post diff view
+          screenshot-3.png     — Consensus meta box on post edit screen
+
+    - path: "deploy_to_wp_org.sh"
+      dna:
+        file: "deploy_to_wp_org.sh"
+        version: "1.0.0"
+        purpose: "ConsensusPress WordPress.org deploy gate script"
+        author: "C-C (Session 12, Sprint 8)"
+        spec: "docs/sprint_8_d1_d7_instructions.yaml D4 deploy_script"
+        gates: "PHPUnit → HAL-001 scanner → WP compliance scanner → readme.txt check"
+
+    - path: "tests/test-unsplash.php"
+      dna:
+        file: "tests/test-unsplash.php"
+        version: "1.0.0"
+        purpose: "PHPUnit tests for ConsensusPress_Post_Builder::fetch_unsplash_image()"
+        author: "C-C (Session 12, Sprint 8)"
+        spec: "docs/sprint_8_d1_d7_instructions.yaml D4 fetch_unsplash_image"
+        php_version: "7.4+"
+        dependencies: "tests/bootstrap.php, class-consensuspress-post-builder.php v2.1.0"
+
+  modified_files:
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+      dna_update:
+        version: "2.0.0 → 2.1.0"
+        author_add: "Modified: C-C (Session 12, Sprint 8)"
+        spec_add: "sprint_8_d1_d7_instructions.yaml D4 fetch_unsplash_image"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-settings.php"
+      dna_update:
+        version: "1.0.0 → 1.1.0"
+        author_add: "Modified: C-C (Session 12, Sprint 8)"
+        spec_add: "sprint_8_d1_d7_instructions.yaml D4 settings_unsplash_field"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-meta-box.php"
+      dna_update:
+        version: "1.1.0 → 1.1.1"
+        author_add: "Modified: C-C (Session 12, Sprint 8)"
+        spec_add: "sprint_8_d1_d7_instructions.yaml D4 meta_box_float_cast_fix"
+
+    - path: "plugin/consensuspress/consensuspress.php"
+      dna_update:
+        version: "2.0.0 → 2.1.0"
+        author_add: "Modified: C-C (Session 12, Sprint 8)"
+
+    - path: "tests/test-meta-box.php"
+      dna_update:
+        version: "1.1.0 → 1.2.0"
+        author_add: "Modified: C-C (Session 12, Sprint 8)"
+        spec_add: "sprint_8_d1_d7_instructions.yaml D4 test_meta_box_reflection_fix"
+
+# =============================================================================
+# D7: VERIFICATION CHECKLIST
+# =============================================================================
+d7_verification:
+
+  pre_flight:
+    - "Confirm wp_remote_get() stub exists in tests/bootstrap.php before writing test-unsplash.php"
+    - "Confirm exact line number of float→int cast in meta-box.php via grep"
+    - "Confirm exact line numbers of setAccessible() in test-meta-box.php via grep"
+
+  scanner_gates:
+    - gate: "hal001_php_scanner"
+      command: "php docs/tooling/php-afd/hal001_php_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+    - gate: "wp_compliance_scanner"
+      command: "php docs/tooling/php-afd/wp_compliance_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+  test_gates:
+    - gate: "Full PHPUnit suite — regression"
+      command: "cd plugin/consensuspress && vendor/bin/phpunit --configuration ../../tests/phpunit.xml"
+      expected: "70+ tests, 0 failures, 0 errors"
+
+    - gate: "New Unsplash tests"
+      expected: "8 new tests in test-unsplash.php — all pass"
+
+    - gate: "Meta-box tests — PHP 8.5 clean"
+      expected: "No deprecation warnings on test-meta-box.php"
+
+  phpunit_xml_update:
+    action: "ADD test-unsplash.php to tests/phpunit.xml explicit file list"
+    note: "D-CP-10-02 locked — explicit file entries only, no directory scan"
+
+  readme_validation:
+    - "All required headers present (Plugin Name through License URI)"
+    - "All required sections present (Description, Installation, FAQ, Screenshots, Changelog)"
+    - "stable tag matches consensuspress.php Version header (2.1.0)"
+    - "Tested up to = 6.7"
+
+  deploy_script_test:
+    command: "bash deploy_to_wp_org.sh"
+    expected: "✅ ALL GATES PASSED"
+
+  manual_checklist:
+    - "fetch_unsplash_image() returns empty array when key not configured"
+    - "fetch_unsplash_image() returns empty array on wp_remote_get WP_Error"
+    - "fetch_unsplash_image() returns empty array on non-200 status"
+    - "fetch_unsplash_image() returns populated array on success"
+    - "create_draft() still works when fetch_unsplash_image() returns empty array"
+    - "New Unsplash key field visible on Settings page"
+    - "float→int deprecation warning gone from meta-box.php"
+    - "setAccessible() deprecation warnings gone from test-meta-box.php"
+    - "readme.txt passes WordPress.org Plugin Check tool"
+    - "deploy_to_wp_org.sh exits 0"
+    - "All DNA headers updated to 2.1.0"
+
+# =============================================================================
+# D8: SEMANTIC CONTRACT PROOF (AFD v1.4.0 MANDATORY)
+# =============================================================================
+d8_semantic_contract_proof:
+
+  probe_questions_generated:
+
+    - question: "What happens if the Unsplash API returns a photo with an empty alt_description?"
+      raised_in: "D4 fetch_unsplash_image body_logic step 12"
+      resolution: "Added fallback: alt_description ?? $keyword — keyword used as alt text"
+      d_doc_updated: "D4"
+
+    - question: "What Unsplash URL field should be used — urls.raw, urls.full, urls.regular, urls.small?"
+      raised_in: "D4 — URL field not specified"
+      resolution: "urls.regular — 1080px wide, appropriate for featured images. Documented in D1 UnsplashApiResponse."
+      d_doc_updated: "D1, D4"
+
+    - question: "Does deploy_to_wp_org.sh cd correctly between gates 1 and 2?"
+      raised_in: "D4 deploy_script — cd into plugin/consensuspress for PHPUnit, then cd back"
+      resolution: "Gate 1 cds into plugin/consensuspress. Gate 2 must cd back to repo root. Specified in script structure."
+      d_doc_updated: "D4"
+
+    - question: "Does phpunit.xml need to be updated to include test-unsplash.php?"
+      raised_in: "D0 — new test file not listed"
+      resolution: "Added to D7 manual checklist. D-CP-10-02 — explicit file entry required."
+      d_doc_updated: "D7"
+
+    - question: "What if wp_remote_get() stub is missing from bootstrap.php?"
+      raised_in: "D5 — mock API section"
+      resolution: "Added pre-flight check in D7. C-C must verify before writing tests."
+      d_doc_updated: "D5, D7"
+
+  open_questions: []  # MUST be empty. All questions resolved above.
+
+  cross_boundary_terms_verified:
+    - term: "consensuspress_unsplash_key"
+      defined_in: "D1 semantic_vocabulary"
+      verified_in:
+        - "D2 C8-02 (Settings → post-builder contract)"
+        - "D2 C8-03 (activate → settings contract)"
+        - "D4 fetch_unsplash_image step 1"
+        - "D4 settings_unsplash_field new_option_key"
+      consistent: true
+
+    - term: "UnsplashImageShape"
+      defined_in: "D1 php_type_shapes"
+      verified_in:
+        - "D2 C8-01 (fetch → sideload contract)"
+        - "D4 fetch_unsplash_image return"
+        - "D4 create_draft_modification insert_code"
+      consistent: true
+
+  branch_anticipation:
+    - expected_branch: "if empty( $key ) → return array()"
+      d_doc_origin: "D4 fetch_unsplash_image body_logic step 2"
+    - expected_branch: "if is_wp_error( $response ) → return array()"
+      d_doc_origin: "D4 fetch_unsplash_image body_logic step 7"
+    - expected_branch: "if 200 !== $status → return array()"
+      d_doc_origin: "D4 fetch_unsplash_image body_logic step 9"
+    - expected_branch: "if empty( $body['urls']['regular'] ) → return array()"
+      d_doc_origin: "D4 fetch_unsplash_image body_logic step 11"
+    - expected_branch: "if deploy gate fails → exit 1"
+      d_doc_origin: "D4 deploy_script structure"
+
+# =============================================================================
+# EXECUTION ORDER FOR C-C
+# =============================================================================
+execution_order:
+
+  phase_1_housekeeping:
+    description: "PHP 8.5 fixes — safest first, no new dependencies"
+    order:
+      - "Fix float→int cast in class-consensuspress-meta-box.php (grep line, patch)"
+      - "Fix setAccessible() × 3 in tests/test-meta-box.php"
+      - "Run PHPUnit — confirm still 62/62 green"
+
+  phase_2_unsplash:
+    description: "Unsplash integration"
+    order:
+      - "Verify wp_remote_get() stub in tests/bootstrap.php — add if missing"
+      - "Add fetch_unsplash_image() to class-consensuspress-post-builder.php"
+      - "Modify create_draft() to call fetch_unsplash_image()"
+      - "Add Unsplash key field to class-consensuspress-settings.php"
+      - "Add consensuspress_unsplash_key to consensuspress_activate() defaults"
+      - "Add consensuspress_unsplash_key to register_setting() block"
+      - "Write tests/test-unsplash.php (8 tests)"
+      - "Add test-unsplash.php to tests/phpunit.xml"
+      - "Run PHPUnit — confirm 70+ green"
+
+  phase_3_packaging:
+    description: "WP.org packaging"
+    order:
+      - "Write plugin/consensuspress/readme.txt"
+      - "Write plugin/consensuspress/assets/README.txt"
+      - "Write deploy_to_wp_org.sh"
+      - "chmod +x deploy_to_wp_org.sh"
+      - "Run bash deploy_to_wp_org.sh — confirm ALL GATES PASSED"
+
+  phase_4_dna_and_version:
+    description: "DNA header updates and version bumps"
+    order:
+      - "Bump consensuspress.php Version header to 2.1.0"
+      - "Update all modified file DNA headers to v2.1.0 / v1.1.0 / v1.1.1 / v1.2.0"
+      - "Final full PHPUnit run — confirm 70+"
+
+# =============================================================================
+# DECISIONS RECORDED
+# =============================================================================
+decisions:
+  D-12-01: "Unsplash fetch in PHP post-builder, not Railway — thin-client principle"
+  D-12-02: "consensuspress_unsplash_key separate from consensuspress_api_key"
+  D-12-03: "Unsplash /photos/random endpoint — query by focus_keyword"
+  D-12-04: "Graceful degradation on Unsplash failure — post never blocked"
+  D-12-05: "deploy_to_wp_org.sh gate sequence: PHPUnit → WP compliance → version consistency (hard exit) → HAL-001 → [--dry-run exits] → SVN commit"
+  D-12-06: "ReflectionMethod::setAccessible() → Closure::bind() pattern"
+
+# =============================================================================
+# KNOWN BLOCKER — C-C MUST NOT HIT THIS BLIND
+# =============================================================================
+known_blocker:
+
+  B-119-01:
+    description: "Railway smoke test gate cannot pass until seekrates_ai deploy script is run"
+    impact: |
+      Sprint 8 C-C execution proceeds normally — all plugin packaging work
+      is independent of Railway. PHPUnit, scanners, readme.txt, deploy script
+      all executable without Railway being live.
+      BLOCKED GATE: Final smoke test (real API key → real topic → real draft created)
+      requires POST /api/v1/cp/consensus to be live on Railway.
+      This gate cannot close until seekrates_ai deploy script runs and Railway
+      picks up consensuspress_endpoints.py v1.0.1.
+    owner: "seekrates_ai deploy — Mohan manual action"
+    c_c_instruction: |
+      DO NOT attempt smoke test during Sprint 8 C-C execution.
+      All other gates (PHPUnit, scanners, deploy_to_wp_org.sh --dry-run) are
+      executable and must pass. Smoke test is explicitly deferred pending B-119-01.
+    status: "OPEN — blocking smoke test only, not packaging work"
+
+# =============================================================================
+# END OF SPRINT 8 D1-D7 SPECIFICATION
+# =============================================================================

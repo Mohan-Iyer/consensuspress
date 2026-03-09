@@ -1,0 +1,401 @@
+# =============================================================================
+# CONSENSUSPRESS RE-ANCHOR — SESSION 13
+# =============================================================================
+# File:     bootstrap/07_ConsensusPress_07.yaml
+# Project:  ConsensusPress by Seekrates
+# Session:  13
+# Date:     2026-03-08
+# Author:   D-C (Session 13)
+# Status:   Sprint 8 COMPLETE (pending PHPUnit confirmation on real disk).
+#           Plugin WP.org ready. deploy_to_wp_org.sh --dry-run all 4 gates PASS.
+#           B-119-01 OPEN — Railway smoke test blocked.
+# Previous: bootstrap/06_ConsensusPress_06.yaml (Session 11)
+#           Sessions 12-13 combined in this anchor.
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: SESSION IDENTITY
+# =============================================================================
+session:
+  id: 13
+  project: "ConsensusPress"
+  date: "2026-03-08"
+  title: "Sprint 8 C-C Execution + QC + Deploy Script Correction"
+  duration: "~3 hours"
+  type: "D-C (QC + corrections) / C-C (Sprint 8 execution)"
+  previous_reanchor: "bootstrap/06_ConsensusPress_06.yaml (Session 11)"
+  sessions_covered: [12, 13]
+  note: |
+    Session 12: Route collision diagnosed (H-CP-11-01), Sprint 8 spec written.
+    Session 13: Sprint 8 C-C execution (Phases 1-3), QC, deploy script correction.
+    Both sessions combined here. Session 12 detail preserved in compacted transcript.
+
+# =============================================================================
+# SECTION 2: SESSION SUMMARY
+# =============================================================================
+session_summary: |
+  Session 12 opened with Route collision discovery: POST /api/v1/consensus
+  collides with seekrates core router. D-12-ROUTE locked: canonical endpoint
+  is /api/v1/cp/consensus. Three files patched (endpoints.py, api.php, mock yaml).
+  D-12-BOUNDARY locked: CP never modifies seekrates_production files. B-119-01
+  opened: Railway smoke test blocked until seekrates_ai deploy script runs.
+  Sprint 8 D1-D7 spec written and saved.
+
+  Session 13: C-C executed Sprint 8 across three phases.
+  Phase 1 (PHP 8.5 housekeeping): float→int cast already correct. setAccessible
+  × 3 replaced with Closure::bind() in test-meta-box.php v1.2.0.
+  Phase 2 (Unsplash): bootstrap.php extended with wp_remote_get + add_query_arg
+  stubs. post-builder v2.1.0 gained private fetch_unsplash_image() method wired
+  into create_draft() step 7. settings.php v1.1.0 added Unsplash key field.
+  8 new tests in test-unsplash.php. phpunit.xml v1.2.0 lists new file.
+  Phase 3 (WP.org packaging): readme.txt (all required sections), assets/README.txt,
+  deploy_to_wp_org.sh v1.0.0. Post-delivery: D-C QC found gate order wrong in
+  deploy script — corrected to v1.0.1 (WP compliance before version check per
+  locked spec). sprint_8_cci_addendum.yaml formalised both corrections.
+  Sandbox PHPUnit: 79/79 GREEN. Deploy dry-run: all 4 gates passed.
+  11 deliverables byte-verified on Mohan's disk.
+
+# =============================================================================
+# SECTION 3: ACHIEVEMENTS
+# =============================================================================
+achievements:
+
+  sprint_completions:
+
+    - id: "SPRINT-8-COMPLETE"
+      description: "Sprint 8 — WordPress.org packaging + Unsplash integration"
+      status: "COMPLETE (pending PHPUnit confirmation on real disk)"
+      sandbox_result: "79/79 GREEN (14 real + 65 stubs)"
+      real_disk_target: "70/70 (62 existing + 8 new Unsplash tests)"
+      deploy_dry_run: "ALL 4 GATES PASSED"
+
+  bugs_fixed:
+
+    - id: "BUG-12-01"
+      description: "Route collision — /api/v1/consensus collides with seekrates core router"
+      fix: "Route changed to /api/v1/cp/consensus in endpoints.py, api.php, mock yaml"
+      decision: "D-12-ROUTE (irreversible)"
+
+    - id: "BUG-13-01"
+      description: "deploy_to_wp_org.sh v1.0.0 gate order wrong"
+      fix: "Reordered to locked spec: PHPUnit → WP compliance → Version consistency → HAL-001"
+      version: "v1.0.0 → v1.0.1"
+
+  documents_produced:
+
+    - "deploy_to_wp_org.sh v1.0.1"
+    - "sprint_8_cci_addendum.yaml v1.0.0"
+    - "indra_update_consensuspress_2026-03-08.yaml (INDRA-CP-04)"
+    - "bootstrap/07_ConsensusPress_07.yaml (this file)"
+
+# =============================================================================
+# SECTION 4: CURRENT STATUS
+# =============================================================================
+current_status:
+
+  plugin:
+    version: "2.1.0"
+    status: "DEPLOY_READY — Sprint 8 complete"
+    test_gate: "79/79 sandbox GREEN — real disk target 70/70 (pending deploy)"
+    four_ills: "CERTIFIED CLEAN (audited Session 11)"
+    wp_compliance: "PASS"
+    deploy_dry_run: "ALL 4 GATES PASSED"
+
+  railway_endpoint:
+    route: "POST /api/v1/cp/consensus"
+    file: "src/api/consensuspress_endpoints.py v1.0.1"
+    status: "BUILT — not yet live on Railway"
+    blocker: "B-119-01 — seekrates_ai deploy script not yet run"
+    boundary: "D-12-BOUNDARY — CP never modifies seekrates_production files"
+
+  wordpress_org:
+    readme_txt: "PRESENT — all required sections"
+    stable_tag: "2.1.0 — matches plugin Version"
+    deploy_script: "deploy_to_wp_org.sh v1.0.1 — 4 gates, --dry-run supported"
+    svn_status: "NOT YET SUBMITTED — pending B-119-01 + PHPUnit confirmation"
+
+  files_directory:
+    status: "PENDING DELETION (OPEN-09-04)"
+    command: "cd ConsensusPress && rm -rf files/"
+
+  ttap:
+    status: "STALE — flagged INDRA-CP-02, CP-03, CP-04"
+    action: "OPEN-TTAP-01 — rewrite required"
+
+# =============================================================================
+# SECTION 5: OPEN ITEMS
+# =============================================================================
+open_items:
+
+  - id: "B-119-01"
+    priority: "HIGH"
+    description: "Railway smoke test blocked — seekrates_ai deploy script not yet run"
+    status: "OPEN"
+    unblocked_by: |
+      Mohan runs seekrates_ai deploy script on Railway.
+      Confirms: curl POST /api/v1/cp/consensus → HTTP 200.
+    c_c_constraint: |
+      C-C MUST NOT attempt end-to-end smoke test before B-119-01 cleared.
+      See sprint_8_cci_addendum.yaml for full constraint language.
+
+  - id: "OPEN-09-04"
+    priority: "MEDIUM"
+    description: "rm -rf files/ — staging directory not yet deleted"
+    status: "PENDING — Mohan manual"
+    command: "cd ConsensusPress && rm -rf files/"
+
+  - id: "OPEN-TTAP-01"
+    priority: "HIGH"
+    description: "TTAP ConsensusPress section rewrite — 8+ sessions out of date"
+    status: "OUTSTANDING — flagged 3× in INDRA updates"
+    next_action: "Schedule dedicated D-C session. TTAP will not self-resolve."
+
+# =============================================================================
+# SECTION 6: DECISIONS REGISTER (cumulative — Sprint 7 + Sessions 12-13)
+# =============================================================================
+decisions:
+
+  D-CP-10-01:
+    decision: "AFD v1.4.0 adopted — D8 + HAL-013 + Spec Ambiguity Probe mandatory Sprint 8"
+    status: "LOCKED"
+    session: 10
+
+  D-CP-10-02:
+    decision: |
+      phpunit.xml explicit <file> entries only. No directory scan.
+      PHPUnit 9 *Test.php suffix silently skips test-*.php.
+    status: "LOCKED — irreversible"
+    session: 10
+
+  D-CP-11-01:
+    decision: "generate_faq_schema() and generate_article_schema() bare @return array deferred TYPE-B"
+    status: "LOCKED"
+    session: 11
+
+  D-CP-11-02:
+    decision: |
+      All test fixtures must use server envelope: {success: true, data: {...}}.
+      API class query() returns $parsed['data'] — not $parsed.
+    status: "LOCKED — prevents fixture regression"
+    session: 11
+
+  D-12-ROUTE:
+    decision: "POST /api/v1/cp/consensus is the canonical ConsensusPress endpoint"
+    status: "LOCKED — irreversible"
+    session: 12
+
+  D-12-BOUNDARY:
+    decision: "ConsensusPress never modifies seekrates_production files. Railway registration is Mohan's manual handoff only."
+    status: "LOCKED — irreversible"
+    session: 12
+
+  D-12-01:
+    decision: "Unsplash fetch in PHP post-builder, not Railway"
+    status: "LOCKED"
+    session: 12
+
+  D-12-02:
+    decision: "consensuspress_unsplash_key stored separately from consensuspress_api_key"
+    status: "LOCKED"
+    session: 12
+
+  D-12-03:
+    decision: "Unsplash /photos/random endpoint, query by focus_keyword"
+    status: "LOCKED"
+    session: 12
+
+  D-12-04:
+    decision: "Unsplash failure is graceful degradation — post still created, image skipped"
+    status: "LOCKED — irreversible"
+    session: 12
+
+  D-12-05:
+    decision: "Deploy script gate sequence: PHPUnit → WP compliance → Version consistency → HAL-001 → SVN"
+    status: "LOCKED — irreversible"
+    session: 13
+
+  D-12-06:
+    decision: "ReflectionMethod::setAccessible() replaced with Closure::bind() for PHP 8.5 compatibility"
+    status: "LOCKED"
+    session: 13
+
+  D-08-06:
+    decision: "All LLM intelligence server-side. Plugin thin client. ILL-3 structurally absent."
+    status: "LOCKED — architectural"
+    session: 8
+
+# =============================================================================
+# SECTION 7: SPRINT REGISTER
+# =============================================================================
+sprint_register:
+
+  sprint_1:
+    status: "COMPLETE"
+    scope: "Plugin skeleton, settings page, API client, test framework"
+    version: "1.0.0"
+    tests: 20
+
+  sprint_2:
+    status: "COMPLETE"
+    scope: "Create Mode — topic → API → WordPress draft"
+    version: "1.1.0"
+    tests: 29
+
+  sprint_3:
+    status: "COMPLETE"
+    scope: "Async WP-Cron, consensus meta box"
+    version: "1.2.0"
+    tests: 34
+
+  sprint_4:
+    status: "COMPLETE"
+    scope: "Rescue Mode + Diff Viewer"
+    version: "1.3.0"
+    tests: 47
+
+  sprint_5:
+    status: "COMPLETE"
+    scope: "Usage Tracking + Tier Enforcement"
+    version: "1.4.0"
+    tests: 55
+
+  sprint_7:
+    status: "COMPLETE — GREEN"
+    scope: "Railway endpoint + T&C gate + Post-Builder v2.0.0 + Mock API v2.0.0"
+    version: "2.0.0"
+    tests: 62
+
+  sprint_8:
+    status: "COMPLETE — pending real PHPUnit confirmation"
+    scope: |
+      PHP 8.5 housekeeping (Closure::bind pattern).
+      Unsplash featured image integration (fetch_unsplash_image).
+      WordPress.org packaging (readme.txt, assets/README.txt, deploy script).
+    version: "2.1.0"
+    tests_sandbox: 79
+    tests_real_target: 70
+    deploy_dry_run: "4/4 gates PASSED"
+
+# =============================================================================
+# SECTION 8: FILE INVENTORY — SPRINT 8 DELIVERABLES
+# =============================================================================
+file_inventory:
+
+  sprint_8_delivered:
+    - "plugin/consensuspress/consensuspress.php                              v2.1.0"
+    - "plugin/consensuspress/includes/class-consensuspress-post-builder.php  v2.1.0"
+    - "plugin/consensuspress/includes/class-consensuspress-settings.php      v1.1.0"
+    - "plugin/consensuspress/includes/class-consensuspress-meta-box.php      v1.1.0  (unchanged)"
+    - "plugin/consensuspress/readme.txt                                       v1.0.0  (NEW)"
+    - "plugin/consensuspress/assets/README.txt                                       (NEW)"
+    - "tests/bootstrap.php                                                    (MODIFIED)"
+    - "tests/phpunit.xml                                                      v1.2.0"
+    - "tests/test-meta-box.php                                                v1.2.0"
+    - "tests/test-unsplash.php                                                v1.0.0  (NEW)"
+    - "deploy_to_wp_org.sh                                                    v1.0.1  (NEW — repo root)"
+
+  session_12_delivered:
+    - "src/api/consensuspress_endpoints.py                                    v1.0.1  (route fix)"
+    - "plugin/consensuspress/includes/class-consensuspress-api.php            v1.1.1  (route fix)"
+    - "docs/consensuspress_mock_api.yaml                                              (route fix)"
+    - "docs/flow_control/ConsensusPress_process.yaml                          v1.0.1  (route fix)"
+
+  session_13_documents:
+    - "sprint_8_cci_addendum.yaml                                             v1.0.0"
+    - "indra_update_consensuspress_2026-03-08.yaml  (INDRA-CP-04)"
+    - "bootstrap/07_ConsensusPress_07.yaml  (this file)"
+
+  pending_manual:
+    - "src/server/main.py — register /api/v1/cp/consensus router (B-119-01)"
+
+  to_delete:
+    - "files/ — entire staging directory (OPEN-09-04)"
+
+# =============================================================================
+# SECTION 9: TIMEFRAME TO COMPLETION
+# =============================================================================
+timeframe:
+
+  h_activities_before_session_14:
+    - "H-CP-13-01: Deploy 11 Sprint 8 files to disk"
+    - "H-CP-13-02: Run real PHPUnit — confirm 70/70 green"
+    - "H-CP-13-03: Run seekrates_ai deploy script → clear B-119-01"
+    - "H-CP-13-04: rm -rf files/ (OPEN-09-04)"
+    - "H-CP-13-05: chmod +x deploy_to_wp_org.sh"
+
+  session_14:
+    label: "WordPress.org Submission + Smoke Test"
+    work: |
+      Run deploy_to_wp_org.sh --dry-run (confirm all 4 gates live).
+      Manual WordPress.org plugin check tool run.
+      SVN commit to WordPress.org plugin repository.
+      Live smoke test: real API key, real topic → real Railway endpoint → real WP draft.
+      WarriorPlus listing setup (if ready).
+    prerequisites:
+      - "B-119-01 cleared (Railway live)"
+      - "PHPUnit 70/70 green on real disk"
+    output: "Plugin live on WordPress.org"
+    duration_estimate: "2-3 hours"
+
+  total_sessions_consumed: 13
+  total_sessions_remaining: 1
+  completion_estimate: 92%
+
+# =============================================================================
+# SECTION 10: METRICS
+# =============================================================================
+metrics:
+  sessions_completed: 13
+  sprints_complete: 7          # Sprints 1-5 + 7 + 8
+  tests_sandbox: 79
+  tests_real_target: 70
+  four_ills_status: "CERTIFIED CLEAN"
+  deploy_dry_run: "4/4 gates PASSED"
+  bugs_fixed_session_12_13: 2
+  bugs_fixed_total: "22+ across all sessions"
+  blockers_open: 3             # B-119-01, OPEN-09-04, OPEN-TTAP-01
+  blockers_hard_blocking: 1    # B-119-01 (Railway) blocks live smoke test
+
+# =============================================================================
+# SECTION 11: HYDRATION INSTRUCTIONS — NEXT SESSION
+# =============================================================================
+hydration:
+  parse_sequence:
+    - "bootstrap/07_ConsensusPress_07.yaml (this file) — Sessions 12-13"
+    - "bootstrap/06_ConsensusPress_06.yaml — Session 11"
+    - "docs/sprint_8_d1_d7_instructions.yaml — Sprint 8 spec"
+    - "docs/sprint_8_cci_addendum.yaml — gate reorder + B-119-01 constraint"
+
+  confirm_on_load:
+    - "B-119-01: Has seekrates_ai deploy script been run? Is /api/v1/cp/consensus returning 200?"
+    - "PHPUnit: Has real 70/70 been confirmed after disk deploy?"
+    - "OPEN-09-04: Has files/ been deleted?"
+    - "OPEN-TTAP-01: Is a TTAP rewrite session being scheduled?"
+
+  first_action_session_14: |
+    Confirm B-119-01 status from Mohan.
+    If cleared: run deploy_to_wp_org.sh --dry-run to confirm all 4 gates live.
+    Then proceed to SVN submission and smoke test.
+
+  critical_contracts_to_preserve:
+    - |
+      ROUTE CONTRACT (D-12-ROUTE):
+      Canonical endpoint is POST /api/v1/cp/consensus.
+      Not /api/v1/consensus. Never regress.
+    - |
+      FIXTURE ENVELOPE CONTRACT (D-CP-11-02):
+      All test fixtures must use: {"success": true, "data": {...engine shape...}}
+      API class query() returns $result['data'] — not $result directly.
+    - |
+      BOUNDARY CONTRACT (D-12-BOUNDARY):
+      ConsensusPress never modifies seekrates_production files.
+      All Railway integration is in CP-owned files or manual Mohan handoff.
+    - |
+      UNSPLASH KEY CONTRACT (D-12-04):
+      fetch_unsplash_image() returns array() on any failure.
+      Consumer (sideload_featured_image) checks empty($featured_image['url']).
+      Post is always created — image is optional.
+
+# =============================================================================
+# END OF SESSION 13 RE-ANCHOR
+# =============================================================================

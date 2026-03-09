@@ -1,0 +1,1017 @@
+# =============================================================================
+# PHASE 0: PHP AFD TOOLING — D1-D7 SPECIFICATION
+# =============================================================================
+# file:      docs/tooling/php-afd/CCI-CP-P0-01_four_ills_php_scanner_suite.yaml
+# sprint:    Phase 0 (Tooling)
+# session:   03
+# author:    D-C (Session 02)
+# status:    READY FOR C-C
+# =============================================================================
+# SCOPE: 3 P0-priority tools (standalone CLI — NOT plugin code)
+#
+#   Tool 1: hal001_php_scanner.php    — ILL-1 detection
+#   Tool 2: inventory_php.php         — ILL-4 prevention
+#   Tool 3: wp_compliance_scanner.php — WordPress.org compliance
+#
+# Plus: test suite for all three, phpunit config, shared utilities.
+#
+# These tools live at ~/tools/php-afd/ and are symlinked into projects.
+# Zero external dependencies — uses only PHP built-in functions.
+# =============================================================================
+# NOTE: These are methodology tools, not plugin code.
+#       D0 preservation contract = N/A (all new scripts).
+#       No WordPress functions used. No WP stubs needed.
+#       PHP 8.1+ is acceptable (runs on Mohan's machine, not client WP sites).
+# =============================================================================
+
+# =============================================================================
+# D1: TYPED SIGNATURES + CONSTANTS
+# =============================================================================
+d1_type_contracts:
+
+  # ---------------------------------------------------------------------------
+  # SHARED CONSTANTS (defined in each tool independently — no shared config file)
+  # ---------------------------------------------------------------------------
+  constants:
+    EXIT_CLEAN: 0
+    EXIT_VIOLATIONS: 1
+    EXIT_ERROR: 2
+    VERSION: "'1.0.0'"
+
+  # ---------------------------------------------------------------------------
+  # SHARED OUTPUT TYPES (conceptual — PHP uses associative arrays with shapes)
+  # ---------------------------------------------------------------------------
+  # PHP 8.1 does NOT have TypedDict. We use PHPDoc array shapes.
+  # Every function documents its return shape in @return annotation.
+  # These shapes are the CONTRACTS. Scanner violations against these
+  # shapes are caught by... this scanner. Bootstrapping problem accepted.
+  # ---------------------------------------------------------------------------
+
+  # ===========================================================================
+  # TOOL 1: hal001_php_scanner.php
+  # ===========================================================================
+  tool_1_hal001:
+
+    file: "hal001_php_scanner.php"
+    purpose: "Detect ILL-1 (type erasure) violations in PHP source files"
+    php_version: "8.1+ (runs on dev machine)"
+    dependencies: "None — PHP built-in only (token_get_all)"
+
+    constants:
+      SUPPRESSION_MARKER: "'@hal001-suppress'"
+      # Violation types
+      VIO_BARE_ARRAY_RETURN: "'bare_array_return'"
+      VIO_BARE_ARRAY_PARAM: "'bare_array_param'"
+      VIO_MIXED_TYPE: "'mixed_type'"
+      VIO_UNTYPED_PARAM: "'untyped_param'"
+      VIO_JSON_DECODE_UNVALIDATED: "'json_decode_unvalidated'"
+      VIO_BARE_ARRAY_ACCESS: "'bare_array_access'"
+
+    # --- Return type shapes ---
+    # Every function below documents its return shape.
+    # C-C MUST implement these shapes exactly.
+
+    functions:
+
+      - name: "main"
+        signature: "function main( array $argv ): int"
+        purpose: |
+          CLI entry point. Accepts directory or file path as argument.
+          Calls scan_path, prints report, returns exit code.
+        params:
+          - name: "$argv"
+            type: "array"
+            shape: "string[] — CLI arguments"
+        returns: "int — EXIT_CLEAN (0) or EXIT_VIOLATIONS (1) or EXIT_ERROR (2)"
+        logic: |
+          1. Validate $argv[1] exists (path argument).
+          2. Resolve path. If directory: collect all .php files recursively.
+             If file: single-file array.
+          3. Exclude: vendor/, node_modules/, tests/ directories.
+          4. For each file: call scan_file().
+          5. Aggregate all violations.
+          6. Call print_report() with aggregated results.
+          7. Return EXIT_CLEAN if zero real violations, EXIT_VIOLATIONS otherwise.
+
+      - name: "scan_file"
+        signature: "function scan_file( string $filepath ): array"
+        purpose: |
+          Scans one PHP file for HAL-001 violations.
+          Two-pass approach: token-based + pattern-based.
+        params:
+          - name: "$filepath"
+            type: "string"
+            description: "Absolute path to PHP file"
+        returns: |
+          array{
+            file:       string,
+            violations: array<int, array{
+              line:       int,
+              type:       string,
+              message:    string,
+              suppressed: bool
+            }>,
+            real_count:      int,
+            suppressed_count: int
+          }
+        logic: |
+          1. Read file contents.
+          2. Pass 1 (token scan): call scan_tokens().
+          3. Pass 2 (pattern scan): call scan_patterns().
+          4. Merge violations from both passes. Deduplicate by line number.
+          5. For each violation: check if line has SUPPRESSION_MARKER in comment.
+             If yes: set suppressed=true.
+          6. Count real (suppressed=false) and suppressed separately.
+          7. Return result array.
+
+      - name: "scan_tokens"
+        signature: "function scan_tokens( string $source, string $filepath ): array"
+        purpose: |
+          Token-based scan using PHP's token_get_all().
+          Detects: bare array return types, bare array params, mixed types,
+          untyped function parameters.
+        params:
+          - name: "$source"
+            type: "string"
+            description: "PHP source code (file contents)"
+          - name: "$filepath"
+            type: "string"
+            description: "File path (for error messages)"
+        returns: |
+          array<int, array{
+            line:    int,
+            type:    string,
+            message: string
+          }>
+        logic: |
+          1. Tokenise source with token_get_all( $source ).
+          2. Walk token stream. Track state:
+             - in_function = false (set true on T_FUNCTION)
+             - function_name = '' (captured after T_FUNCTION + T_STRING)
+             - paren_depth = 0 (track parameter list)
+             - after_colon = false (return type position)
+          3. DETECTION — bare array return type:
+             After closing ')' of function params, if ':' followed by T_STRING 'array',
+             check if preceding PHPDoc block contains '@return array{'.
+             If no PHPDoc shape: emit VIO_BARE_ARRAY_RETURN.
+          4. DETECTION — bare array parameter:
+             Inside parameter list, if T_STRING 'array' followed by T_VARIABLE,
+             check if PHPDoc contains '@param array{...} $varname'.
+             If no PHPDoc shape: emit VIO_BARE_ARRAY_PARAM.
+          5. DETECTION — mixed type:
+             If T_STRING 'mixed' appears as parameter type or return type:
+             emit VIO_MIXED_TYPE.
+          6. DETECTION — untyped parameter:
+             Inside parameter list, if T_VARIABLE is NOT preceded by a type token
+             (T_STRING, T_ARRAY, '?', T_NAME_QUALIFIED) AND no @param for that variable:
+             emit VIO_UNTYPED_PARAM.
+          7. PHPDoc extraction: Before each function, capture the nearest T_DOC_COMMENT.
+             Parse for @return and @param annotations.
+
+      - name: "scan_patterns"
+        signature: "function scan_patterns( string $source, string $filepath ): array"
+        purpose: |
+          Regex-based scan for patterns that token scan cannot detect.
+          Detects: json_decode without validation, bare array access on variables
+          that appear to hold API/external data.
+        params:
+          - name: "$source"
+            type: "string"
+          - name: "$filepath"
+            type: "string"
+        returns: |
+          array<int, array{
+            line:    int,
+            type:    string,
+            message: string
+          }>
+        logic: |
+          1. Split source into lines.
+          2. DETECTION — json_decode without validation:
+             Find lines with json_decode(). Check if next 5 lines contain
+             'null ===', 'json_last_error', or 'isset(' on the result variable.
+             If no validation found: emit VIO_JSON_DECODE_UNVALIDATED.
+          3. DETECTION — bare array access on response data:
+             Find patterns like $response['key'] or $data['key'] where
+             $response/$data was assigned from json_decode or wp_remote_*.
+             Check if protected by isset() or array_key_exists() within
+             5 lines before the access.
+             If unprotected: emit VIO_BARE_ARRAY_ACCESS.
+          Note: This pass has false positives. That's acceptable —
+          suppression mechanism handles it. False negatives are worse.
+
+      - name: "extract_phpdoc"
+        signature: "function extract_phpdoc( array $tokens, int $function_token_index ): ?string"
+        purpose: |
+          Walk backwards from function token to find nearest T_DOC_COMMENT.
+          Skip whitespace and other non-doc tokens.
+        returns: "?string — PHPDoc block text or null if none found"
+
+      - name: "phpdoc_has_array_shape"
+        signature: "function phpdoc_has_array_shape( ?string $phpdoc, string $tag, string $var_name = '' ): bool"
+        purpose: |
+          Check if PHPDoc contains an array shape annotation.
+          For @return: checks for '@return array{' pattern.
+          For @param: checks for '@param array{...} $var_name' pattern.
+        params:
+          - name: "$phpdoc"
+            type: "?string"
+          - name: "$tag"
+            type: "string"
+            description: "'return' or 'param'"
+          - name: "$var_name"
+            type: "string"
+            description: "Variable name (for @param matching)"
+        returns: "bool — true if shape annotation found"
+
+      - name: "print_report"
+        signature: "function print_report( array $results ): void"
+        purpose: |
+          Print human-readable report to stdout.
+          Groups violations by file. Shows suppressed separately.
+          Final line: PASS or FAIL with counts.
+        params:
+          - name: "$results"
+            type: "array"
+            shape: |
+              array<int, array{
+                file: string,
+                violations: array,
+                real_count: int,
+                suppressed_count: int
+              }>
+        output_format: |
+          ==========================================================
+          hal001_php_scanner v1.0.0 — ILL-1 Type Erasure Detection
+          ==========================================================
+
+          FILE: includes/class-consensuspress-api.php
+            L147  bare_array_return  query() returns untyped array
+            L198  bare_array_return  test_connection() returns untyped array
+            L220  bare_array_return  get_usage() returns untyped array
+
+          FILE: includes/class-consensuspress-settings.php
+            [none]
+
+          ----------------------------------------------------------
+          Files scanned:  3
+          Violations:     3 real, 0 suppressed
+          ----------------------------------------------------------
+          FAIL — 3 violations found
+          ==========================================================
+
+  # ===========================================================================
+  # TOOL 2: inventory_php.php
+  # ===========================================================================
+  tool_2_inventory:
+
+    file: "inventory_php.php"
+    purpose: "Machine-generate function/method inventory for D0 preservation contracts"
+    php_version: "8.1+"
+    dependencies: "None — PHP built-in only"
+
+    functions:
+
+      - name: "main"
+        signature: "function main( array $argv ): int"
+        purpose: |
+          CLI entry point. Accepts file path as argument.
+          Produces YAML-formatted inventory to stdout.
+        returns: "int — EXIT_CLEAN (0) or EXIT_ERROR (2)"
+        logic: |
+          1. Validate $argv[1] exists.
+          2. Call inventory_file().
+          3. Call print_yaml() with result.
+          4. Return EXIT_CLEAN.
+
+      - name: "inventory_file"
+        signature: "function inventory_file( string $filepath ): array"
+        purpose: |
+          Token-based function/method inventory of a PHP file.
+          Detects all function and method declarations.
+        returns: |
+          array{
+            source_file:    string,
+            inventory_date: string,
+            inventory_sha256: string,
+            function_count: int,
+            functions: array<int, array{
+              name:           string,
+              line:           int,
+              kind:           string,
+              visibility:     string,
+              class:          string,
+              interface:      string,
+              signature_hash: string,
+              must_preserve:  bool
+            }>
+          }
+        logic: |
+          1. Read file. Compute SHA256 of file contents.
+          2. Tokenise with token_get_all().
+          3. Walk token stream. Track state:
+             - current_class = '' (set on T_CLASS + T_STRING)
+             - current_interface = '' (set on T_INTERFACE + T_STRING)
+             - current_visibility = 'public' (set on T_PUBLIC/T_PROTECTED/T_PRIVATE)
+             - brace_depth = 0 (track class/interface scope)
+          4. On T_FUNCTION:
+             - Capture function name (next T_STRING).
+             - Capture line number from token.
+             - Capture parameter list (everything between parens).
+             - Capture return type (after ':' token, if present).
+             - Build normalised signature string: "visibility function name(params): return"
+             - Hash: first 8 chars of SHA256 of signature string.
+             - Determine kind: 'method' if inside class, 'interface_method' if
+               inside interface, 'function' if global.
+             - Set must_preserve = true (default for all entries).
+          5. Return structured inventory.
+
+      - name: "print_yaml"
+        signature: "function print_yaml( array $inventory ): void"
+        purpose: |
+          Print inventory as YAML to stdout.
+          Format matches CCI D0 section exactly — paste-ready.
+        output_format: |
+          # Generated by inventory_php.php v1.0.0
+          # Source: includes/class-consensuspress-api.php
+          # Date: 2026-02-28T10:30:00Z
+          source_file: "includes/class-consensuspress-api.php"
+          inventory_date: "2026-02-28T10:30:00Z"
+          inventory_sha256: "a78f5099..."
+          function_count: 5
+          functions:
+            - name: "post"
+              line: 55
+              kind: "method"
+              visibility: "public"
+              class: "ConsensusPress_WP_Transport"
+              interface: ""
+              signature_hash: "79fdb77d"
+              must_preserve: true
+            - name: "query"
+              line: 115
+              kind: "method"
+              visibility: "public"
+              class: "ConsensusPress_API"
+              interface: ""
+              signature_hash: "bd0e4315"
+              must_preserve: true
+        note: |
+          YAML is generated by string formatting, NOT by a YAML library.
+          This avoids the symfony/yaml dependency.
+          Format is simple enough (flat keys, list of flat dicts) that
+          manual YAML generation is reliable and testable.
+
+      - name: "normalize_signature"
+        signature: "function normalize_signature( string $visibility, string $name, string $params, string $return_type ): string"
+        purpose: |
+          Build normalised signature string for hashing.
+          Strips whitespace variations so hash is stable across formatting changes.
+        returns: "string — normalised signature"
+
+  # ===========================================================================
+  # TOOL 3: wp_compliance_scanner.php
+  # ===========================================================================
+  tool_3_wp_compliance:
+
+    file: "wp_compliance_scanner.php"
+    purpose: "Detect WordPress.org compliance violations"
+    php_version: "8.1+"
+    dependencies: "None"
+
+    constants:
+      # Violation codes — prefixed HAL-WP-
+      WP_UNSANITIZED_INPUT: "'HAL-WP-001'"
+      WP_UNESCAPED_OUTPUT: "'HAL-WP-002'"
+      WP_MISSING_NONCE: "'HAL-WP-003'"
+      WP_MISSING_CAPABILITY: "'HAL-WP-004'"
+      WP_INLINE_SCRIPT: "'HAL-WP-005'"
+      WP_NO_ABSPATH: "'HAL-WP-006'"
+      WP_HARDCODED_PATH: "'HAL-WP-007'"
+      WP_UNPREPARED_SQL: "'HAL-WP-008'"
+
+    functions:
+
+      - name: "main"
+        signature: "function main( array $argv ): int"
+        purpose: "CLI entry point. Scans directory for WP compliance violations."
+        returns: "int — exit code"
+        logic: |
+          1. Validate $argv[1] (directory path).
+          2. Collect all .php files recursively. Exclude vendor/, node_modules/, tests/.
+          3. For each file: call scan_wp_compliance().
+          4. Aggregate violations.
+          5. Call print_wp_report().
+          6. Return EXIT_CLEAN or EXIT_VIOLATIONS.
+
+      - name: "scan_wp_compliance"
+        signature: "function scan_wp_compliance( string $filepath ): array"
+        purpose: "Scan one PHP file for all 8 WP compliance violation types."
+        returns: |
+          array{
+            file: string,
+            violations: array<int, array{
+              line: int,
+              code: string,
+              message: string
+            }>,
+            count: int
+          }
+        logic: |
+          1. Read file into lines array.
+          2. Read file as string for multi-line checks.
+          3. Check HAL-WP-006 first: if file has .php extension and is NOT
+             the main plugin file, check first executable line for
+             'if ( ! defined( \'ABSPATH\' ) )' or equivalent.
+             If missing: emit HAL-WP-006.
+          4. For each line:
+             a. HAL-WP-001 (unsanitized input):
+                If line contains $_POST, $_GET, $_REQUEST, $_SERVER, $_COOKIE
+                AND the value is NOT wrapped in sanitize_text_field(),
+                absint(), sanitize_email(), wp_kses(), intval(), (int),
+                sanitize_url(), sanitize_file_name(), sanitize_key(),
+                wp_unslash(), or other sanitize_* functions:
+                emit HAL-WP-001.
+                Detection: regex for \$_(POST|GET|REQUEST|SERVER|COOKIE)\[
+                Check same line or assignment target line for sanitize wrapper.
+             b. HAL-WP-002 (unescaped output):
+                If line contains 'echo $' or 'echo get_option' or 'echo ${' or
+                'print $' AND is NOT wrapped in esc_html(), esc_attr(),
+                esc_url(), esc_textarea(), wp_kses(), wp_kses_post(),
+                absint(), intval(), (int):
+                emit HAL-WP-002.
+                EXCLUDE: lines inside a <?php echo esc_* pattern.
+                EXCLUDE: echo in CLI context (tools, not plugin code).
+             c. HAL-WP-005 (inline script/style):
+                If line contains '<script' or '<style' inside .php files
+                in admin/views/ or includes/ directories:
+                emit HAL-WP-005.
+                EXCLUDE: wp_add_inline_script() and wp_add_inline_style().
+          5. Multi-line checks (on full file string):
+             a. HAL-WP-003 (missing nonce):
+                Find all wp_ajax_ action registrations.
+                For each: find the callback function body.
+                If callback body does NOT contain check_ajax_referer()
+                or wp_verify_nonce(): emit HAL-WP-003 on the add_action line.
+             b. HAL-WP-004 (missing capability):
+                For each wp_ajax_ callback AND each admin page render function:
+                If body does NOT contain current_user_can():
+                emit HAL-WP-004.
+             c. HAL-WP-008 (unprepared SQL):
+                If file contains $wpdb->query() or $wpdb->get_results() or
+                $wpdb->get_var() or $wpdb->get_row() AND the argument is NOT
+                $wpdb->prepare(): emit HAL-WP-008.
+                EXCEPTION: $wpdb->delete() and $wpdb->insert() with array args
+                are safe (WordPress handles preparation).
+          6. HAL-WP-007 (hardcoded paths):
+             Find string literals containing '/wp-content/', '/wp-includes/',
+             '/wp-admin/' that are NOT inside comments or plugin_dir_path()
+             or ABSPATH concatenation: emit HAL-WP-007.
+
+      - name: "print_wp_report"
+        signature: "function print_wp_report( array $results ): void"
+        purpose: "Print WP compliance report to stdout."
+        output_format: |
+          ==========================================================
+          wp_compliance_scanner v1.0.0 — WordPress.org Compliance
+          ==========================================================
+
+          FILE: includes/class-consensuspress-api.php
+            [clean]
+
+          FILE: admin/views/settings.php
+            L15  HAL-WP-002  echo $value without esc_attr()
+
+          ----------------------------------------------------------
+          Files scanned:  5
+          Violations:     1
+          ----------------------------------------------------------
+          FAIL — 1 violation found
+          ==========================================================
+
+# =============================================================================
+# D2: DOUBLE-ENTRY CONTRACTS
+# =============================================================================
+d2_double_entry_contracts:
+
+  note: |
+    These tools are STANDALONE. They consume files from disk and produce
+    reports to stdout. The contract chain is simpler than plugin code.
+
+  contracts:
+
+    # --- hal001_php_scanner ---
+    - output: "Violation report (stdout)"
+      producer: "hal001_php_scanner.php::print_report"
+      consumed_by: "Human (D-C/Mohan) reads terminal output"
+      contract_verified: true
+
+    - output: "Exit code (0 or 1)"
+      producer: "hal001_php_scanner.php::main"
+      consumed_by: "validate_all_php.sh (checks exit code)"
+      contract_verified: true
+
+    # --- inventory_php ---
+    - output: "YAML inventory (stdout)"
+      producer: "inventory_php.php::print_yaml"
+      consumed_by: "D-C pastes into CCI D0 section"
+      contract_verified: true
+
+    - output: "YAML inventory (stdout)"
+      producer: "inventory_php.php::print_yaml"
+      consumed_by: "diff_inventories_php.php (future — P1 sprint)"
+      contract_verified: true
+
+    # --- wp_compliance_scanner ---
+    - output: "Compliance report (stdout)"
+      producer: "wp_compliance_scanner.php::print_wp_report"
+      consumed_by: "Human reads terminal output"
+      contract_verified: true
+
+    - output: "Exit code (0 or 1)"
+      producer: "wp_compliance_scanner.php::main"
+      consumed_by: "validate_all_php.sh"
+      contract_verified: true
+
+  balance_check: "BALANCED"
+
+# =============================================================================
+# D3: API CONTRACTS (External Interfaces)
+# =============================================================================
+d3_api_contracts:
+
+  note: |
+    These tools have NO external API calls. They read files from disk.
+    The only "API" is the CLI interface (argv in, stdout/exit code out).
+    PHP's token_get_all() is the only non-trivial built-in used.
+
+  token_get_all_contract:
+    function: "token_get_all( string $code, int $flags = 0 )"
+    input: "PHP source code as string"
+    output: |
+      array<int, array{0: int, 1: string, 2: int}|string>
+      Each element is either:
+        - array(TOKEN_ID, TOKEN_TEXT, LINE_NUMBER) for named tokens
+        - string for single-character tokens ( '(', ')', '{', '}', ':', ';', ',' etc.)
+    critical_tokens_used:
+      - "T_FUNCTION (334) — function keyword"
+      - "T_STRING (319) — identifiers including function names"
+      - "T_VARIABLE (320) — $variable_name"
+      - "T_PUBLIC (361) — public keyword"
+      - "T_PROTECTED (362) — protected keyword"
+      - "T_PRIVATE (363) — private keyword"
+      - "T_CLASS (369) — class keyword"
+      - "T_INTERFACE (370) — interface keyword"
+      - "T_DOC_COMMENT (378) — /** PHPDoc blocks */"
+      - "T_COMMENT (377) — // and /* comments */"
+      - "T_WHITESPACE (382) — whitespace"
+      - "T_RETURN (348) — return keyword"
+    note: |
+      Token IDs may vary between PHP versions. ALWAYS use T_* constants,
+      never hardcoded integers. C-C must use the constant names.
+
+# =============================================================================
+# D4: TEST SCENARIOS
+# =============================================================================
+d4_test_scenarios:
+
+  test_file_map:
+    - production: "hal001_php_scanner.php"
+      test: "tests/test-hal001-scanner.php"
+    - production: "inventory_php.php"
+      test: "tests/test-inventory.php"
+    - production: "wp_compliance_scanner.php"
+      test: "tests/test-wp-compliance.php"
+
+  # --- Fixture files (PHP source snippets for scanner input) ---
+  fixtures_required:
+    location: "tests/fixtures/"
+    files:
+      - name: "clean_file.php"
+        content: "PHP file with no violations. Proper PHPDoc shapes, types, escaping."
+      - name: "type_erasure_violations.php"
+        content: |
+          PHP file with known violations:
+          - function returning bare 'array' (no PHPDoc shape)
+          - function with 'mixed' parameter
+          - function with untyped parameter
+          - json_decode without validation
+          Lines and violation types are deterministic.
+      - name: "type_erasure_suppressed.php"
+        content: "PHP file with violations that have @hal001-suppress comments."
+      - name: "wp_clean_plugin.php"
+        content: "Plugin file with correct ABSPATH, sanitization, escaping, nonces."
+      - name: "wp_violations.php"
+        content: |
+          PHP file with known WP violations:
+          - echo $var without escaping
+          - $_POST access without sanitization
+          - wp_ajax_ handler without nonce check
+          - No ABSPATH check at top
+      - name: "inventory_sample.php"
+        content: |
+          PHP file with known functions for inventory testing:
+          - 2 global functions
+          - 1 class with 3 methods (public, protected, private)
+          - 1 interface with 1 method
+          Total: 6 callables
+
+  # --- Test Scenarios ---
+  scenarios:
+
+    # hal001_php_scanner tests
+    HAL-T-001:
+      tool: "hal001_php_scanner"
+      scenario: "Clean file returns zero violations"
+      input: "fixtures/clean_file.php"
+      expected: "scan_file returns real_count=0, exit code 0"
+
+    HAL-T-002:
+      tool: "hal001_php_scanner"
+      scenario: "Bare array return type detected"
+      input: "fixtures/type_erasure_violations.php"
+      expected: "At least 1 violation with type=bare_array_return"
+
+    HAL-T-003:
+      tool: "hal001_php_scanner"
+      scenario: "Mixed type detected"
+      input: "fixtures/type_erasure_violations.php"
+      expected: "At least 1 violation with type=mixed_type"
+
+    HAL-T-004:
+      tool: "hal001_php_scanner"
+      scenario: "Untyped parameter detected"
+      input: "fixtures/type_erasure_violations.php"
+      expected: "At least 1 violation with type=untyped_param"
+
+    HAL-T-005:
+      tool: "hal001_php_scanner"
+      scenario: "json_decode without validation detected"
+      input: "fixtures/type_erasure_violations.php"
+      expected: "At least 1 violation with type=json_decode_unvalidated"
+
+    HAL-T-006:
+      tool: "hal001_php_scanner"
+      scenario: "Suppressed violations reported but don't trigger failure"
+      input: "fixtures/type_erasure_suppressed.php"
+      expected: "suppressed_count > 0, real_count = 0, exit code 0"
+
+    HAL-T-007:
+      tool: "hal001_php_scanner"
+      scenario: "PHPDoc array shape annotation prevents violation"
+      input: "fixtures/clean_file.php"
+      expected: "Functions with @return array{key: type} are NOT flagged"
+
+    # inventory_php tests
+    INV-T-001:
+      tool: "inventory_php"
+      scenario: "Correct function count"
+      input: "fixtures/inventory_sample.php"
+      expected: "function_count = 6"
+
+    INV-T-002:
+      tool: "inventory_php"
+      scenario: "Class methods have correct visibility and class name"
+      input: "fixtures/inventory_sample.php"
+      expected: |
+        Public method: kind=method, visibility=public, class=SampleClass
+        Protected method: kind=method, visibility=protected, class=SampleClass
+        Private method: kind=method, visibility=private, class=SampleClass
+
+    INV-T-003:
+      tool: "inventory_php"
+      scenario: "Interface methods detected"
+      input: "fixtures/inventory_sample.php"
+      expected: "kind=interface_method, interface=SampleInterface"
+
+    INV-T-004:
+      tool: "inventory_php"
+      scenario: "Signature hash is stable"
+      input: "fixtures/inventory_sample.php"
+      expected: "Running twice produces identical signature_hash for each function"
+
+    INV-T-005:
+      tool: "inventory_php"
+      scenario: "SHA256 of source file is correct"
+      input: "fixtures/inventory_sample.php"
+      expected: "inventory_sha256 matches sha256 of file contents"
+
+    # wp_compliance_scanner tests
+    WP-T-001:
+      tool: "wp_compliance_scanner"
+      scenario: "Clean plugin file returns zero violations"
+      input: "fixtures/wp_clean_plugin.php"
+      expected: "count = 0, exit code 0"
+
+    WP-T-002:
+      tool: "wp_compliance_scanner"
+      scenario: "Unescaped output detected"
+      input: "fixtures/wp_violations.php"
+      expected: "At least 1 violation with code=HAL-WP-002"
+
+    WP-T-003:
+      tool: "wp_compliance_scanner"
+      scenario: "Unsanitized input detected"
+      input: "fixtures/wp_violations.php"
+      expected: "At least 1 violation with code=HAL-WP-001"
+
+    WP-T-004:
+      tool: "wp_compliance_scanner"
+      scenario: "Missing nonce on AJAX handler detected"
+      input: "fixtures/wp_violations.php"
+      expected: "At least 1 violation with code=HAL-WP-003"
+
+    WP-T-005:
+      tool: "wp_compliance_scanner"
+      scenario: "Missing ABSPATH check detected"
+      input: "fixtures/wp_violations.php"
+      expected: "At least 1 violation with code=HAL-WP-006"
+
+  total_scenarios: 17
+  total_fixtures: 6
+
+# =============================================================================
+# D5: DIRECTORY MAP
+# =============================================================================
+d5_directory_map:
+
+  root: "php-afd/"
+  structure: |
+    php-afd/
+    ├── hal001_php_scanner.php
+    ├── inventory_php.php
+    ├── wp_compliance_scanner.php
+    ├── phpunit.xml
+    └── tests/
+        ├── test-hal001-scanner.php
+        ├── test-inventory.php
+        ├── test-wp-compliance.php
+        └── fixtures/
+            ├── clean_file.php
+            ├── type_erasure_violations.php
+            ├── type_erasure_suppressed.php
+            ├── wp_clean_plugin.php
+            ├── wp_violations.php
+            └── inventory_sample.php
+
+  file_count: 12   # 3 tools + 1 phpunit.xml + 3 test files + 6 fixtures
+  note: |
+    After build: copy php-afd/ to ~/tools/php-afd/
+    Symlink into ConsensusPress: ln -s ~/tools/php-afd consensuspress/tools
+
+# =============================================================================
+# D6: IMPORT SPECIFICATION
+# =============================================================================
+d6_import_specification:
+
+  note: |
+    No external imports. All tools use PHP built-in functions only.
+    No Composer. No autoloader. Each tool is a standalone script.
+
+  hal001_php_scanner:
+    requires: "None — standalone script"
+    built_ins_used:
+      - "token_get_all() — PHP tokeniser"
+      - "file_get_contents() — read source files"
+      - "preg_match() / preg_match_all() — regex patterns"
+      - "hash('sha256', ...) — NOT USED in this tool"
+      - "is_dir(), is_file() — path validation"
+      - "RecursiveDirectoryIterator — directory traversal"
+      - "RecursiveIteratorIterator — flattening directory tree"
+
+  inventory_php:
+    requires: "None"
+    built_ins_used:
+      - "token_get_all()"
+      - "file_get_contents()"
+      - "hash('sha256', $content) — file hash for inventory"
+      - "date('c') — ISO 8601 timestamp"
+
+  wp_compliance_scanner:
+    requires: "None"
+    built_ins_used:
+      - "file_get_contents()"
+      - "file() — read file into lines array"
+      - "preg_match() — regex pattern matching"
+      - "RecursiveDirectoryIterator"
+      - "RecursiveIteratorIterator"
+      - "strpos() / str_contains() — string searching"
+
+  test_files:
+    requires: "PHPUnit (installed globally via apt — same as Sprint 1)"
+    note: "phpunit.xml configures test suite. No additional dependencies."
+
+# =============================================================================
+# D7: TEST INFRASTRUCTURE
+# =============================================================================
+d7_test_infrastructure:
+
+  phpunit_xml:
+    bootstrap: "None — no bootstrap needed (no WP stubs required)"
+    testsuite_name: "PHP-AFD-Tools"
+    directory: "tests"
+    prefix: "test-"
+
+  fixture_file_specifications:
+
+    clean_file_php: |
+      <?php
+      /**
+       * Clean file — no violations expected.
+       */
+      if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+      /**
+       * @param string $topic Query topic.
+       * @return array{
+       *   success: bool,
+       *   data:    array{score: float, provider: string}|null,
+       *   error:   array{code: string, message: string}|null
+       * }
+       */
+      function query_api( string $topic ): array {
+          $response = wp_remote_post( 'https://example.com', array() );
+          if ( is_wp_error( $response ) ) {
+              return array( 'success' => false, 'data' => null, 'error' => array( 'code' => 'fail', 'message' => 'Failed' ) );
+          }
+          $body = wp_remote_retrieve_body( $response );
+          $data = json_decode( $body, true );
+          if ( null === $data ) {
+              return array( 'success' => false, 'data' => null, 'error' => array( 'code' => 'bad_json', 'message' => 'Invalid' ) );
+          }
+          return array( 'success' => true, 'data' => $data, 'error' => null );
+      }
+
+      /**
+       * @param array{title: string, content: string} $post_data Post fields.
+       * @return int Post ID.
+       */
+      function create_draft( array $post_data ): int {
+          return wp_insert_post( $post_data );
+      }
+
+    type_erasure_violations_php: |
+      <?php
+      /**
+       * File with known violations for testing.
+       * DO NOT ADD @hal001-suppress — these must be detected.
+       */
+
+      // VIO_BARE_ARRAY_RETURN — function returns array, no PHPDoc shape
+      function get_settings(): array {
+          return array( 'key' => 'value' );
+      }
+
+      // VIO_MIXED_TYPE — mixed parameter
+      function process_data( mixed $input ): string {
+          return (string) $input;
+      }
+
+      // VIO_UNTYPED_PARAM — no type hint, no @param
+      function transform( $data ) {
+          return $data;
+      }
+
+      // VIO_JSON_DECODE_UNVALIDATED — json_decode with no check
+      function parse_response( string $body ): array {
+          $data = json_decode( $body, true );
+          return $data['result'];
+      }
+
+    type_erasure_suppressed_php: |
+      <?php
+      /**
+       * File with suppressed violations.
+       */
+
+      // @hal001-suppress WP core returns mixed
+      function get_wp_option( string $key ): mixed {
+          return get_option( $key );
+      }
+
+      /** @return array{id: int, name: string} */
+      function get_clean_data(): array {
+          return array( 'id' => 1, 'name' => 'test' );
+      }
+
+    wp_clean_plugin_php: |
+      <?php
+      if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+      function render_page() {
+          if ( ! current_user_can( 'manage_options' ) ) { return; }
+          $name = get_option( 'my_name', '' );
+          echo '<h1>' . esc_html( $name ) . '</h1>';
+      }
+
+      function handle_save() {
+          check_ajax_referer( 'my_nonce', 'nonce' );
+          if ( ! current_user_can( 'manage_options' ) ) {
+              wp_send_json_error( 'Forbidden' );
+          }
+          $value = sanitize_text_field( $_POST['value'] );
+          update_option( 'my_value', $value );
+          wp_send_json_success( 'Saved' );
+      }
+      add_action( 'wp_ajax_my_save', 'handle_save' );
+
+    wp_violations_php: |
+      <?php
+      // HAL-WP-006: No ABSPATH check
+
+      // HAL-WP-002: Unescaped output
+      function show_name() {
+          $name = get_option( 'my_name' );
+          echo $name;
+      }
+
+      // HAL-WP-001: Unsanitized input
+      function save_data() {
+          $value = $_POST['value'];
+          update_option( 'my_value', $value );
+      }
+
+      // HAL-WP-003: Missing nonce on AJAX handler
+      function ajax_handler() {
+          $data = sanitize_text_field( $_POST['data'] );
+          wp_send_json_success( $data );
+      }
+      add_action( 'wp_ajax_my_action', 'ajax_handler' );
+
+    inventory_sample_php: |
+      <?php
+      /**
+       * Sample file for inventory testing.
+       * Known inventory: 6 callables.
+       */
+
+      function global_function_one(): void {}
+
+      function global_function_two( string $arg ): string { return $arg; }
+
+      class SampleClass {
+          public function public_method(): int { return 1; }
+          protected function protected_method(): void {}
+          private function private_method( string $x ): string { return $x; }
+      }
+
+      interface SampleInterface {
+          public function interface_method(): array;
+      }
+
+  test_approach: |
+    Each test class directly calls the tool's functions (require_once the tool file).
+    Tests pass fixture file paths to scan_file() / inventory_file() / scan_wp_compliance().
+    Assertions verify: violation counts, violation types, line numbers, exit codes.
+    No mocking needed — tools operate on real PHP files (the fixtures).
+
+# =============================================================================
+# SEMANTIC VOCABULARY (Phase 0 subset)
+# =============================================================================
+vocabulary:
+  violation: "A detected code pattern that fails a HAL check"
+  suppression: "An inline comment that marks a violation as intentionally accepted"
+  real_count: "Violations that are NOT suppressed — these trigger exit 1"
+  fixture: "A PHP source file with known characteristics, used as test input"
+  inventory: "Machine-generated list of functions/methods in a PHP file"
+  signature_hash: "First 8 hex chars of SHA256 of normalised function signature"
+
+# =============================================================================
+# ESTIMATED LOC
+# =============================================================================
+estimates:
+  hal001_php_scanner: 280
+  inventory_php: 200
+  wp_compliance_scanner: 250
+  test_hal001: 180
+  test_inventory: 120
+  test_wp_compliance: 150
+  fixtures: 120
+  phpunit_xml: 12
+  total: "~1,312"
+
+# =============================================================================
+# HAL SCAN CHECKLIST (for C-C delivery of these tools)
+# =============================================================================
+hal_scan:
+  HAL-001: "N/A — these tools ARE the scanner. Bootstrapping accepted."
+  HAL-002: "Tests must assert specific values, not just assertTrue(true)"
+  HAL-003: "All PHP built-in functions verified: token_get_all, hash, date, preg_match"
+  HAL-004: "No TODO/FIXME in delivered code"
+  HAL-005: "No requires — standalone scripts"
+  HAL-006: "All file_get_contents wrapped in file_exists check"
+  HAL-007: "No hardcoded paths — all from CLI arguments"
+  HAL-008: "All token IDs via T_* constants, never hardcoded integers"
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-28"
+    author: "D-C (Session 02)"
+    changes: "Initial Phase 0 specification — 3 P0-priority tools"
+
+# =============================================================================
+# END OF PHASE 0 D1-D7
+# =============================================================================

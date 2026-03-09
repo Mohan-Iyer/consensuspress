@@ -1,0 +1,495 @@
+# =============================================================================
+# PROCESS FLOW: ConsensusPress v1.5.0
+# =============================================================================
+# document_name: "ConsensusPress_process.yaml"
+# version: "1.0.1"
+# created: "2026-03-03"
+# author: "D-C (Session 08)"
+# purpose: |
+#   Complete process flows for all user journeys, system flows, and error paths.
+#   Covers: Create Mode, Rescue Mode, Settings, Usage Enforcement, Uninstall.
+#   Reference for smoke testing, QA, and future development.
+# related: "hlr_consensus_plus.yaml v1.2.0"
+# =============================================================================
+
+# =============================================================================
+# ACTORS
+# =============================================================================
+actors:
+  user: "WordPress admin user with edit_posts capability"
+  plugin: "ConsensusPress plugin (WordPress PHP layer)"
+  server: "Seekrates AI Railway server (POST /api/v1/cp/consensus)"
+  wp_cron: "WordPress pseudo-cron (triggered by page visits)"
+  wp_db: "WordPress database (wp_options, wp_posts, wp_postmeta, wp_transients)"
+
+# =============================================================================
+# FLOW 1: PLUGIN ACTIVATION
+# =============================================================================
+flow_activation:
+  trigger: "User activates plugin from Plugins page"
+  steps:
+    - step: 1
+      actor: plugin
+      action: "consensuspress_activate() fires via register_activation_hook"
+    - step: 2
+      actor: plugin
+      action: "Set default options in wp_options"
+      data:
+        - "consensuspress_api_key = '' (empty)"
+        - "consensuspress_post_status = 'draft'"
+        - "consensuspress_usage = { credits_used:0, credits_limit:3, tier:'free', reset_date:+30days }"
+    - step: 3
+      actor: plugin
+      action: "plugins_loaded fires → consensuspress_init() boots all 7 classes"
+      classes_booted:
+        - ConsensusPress_Settings
+        - ConsensusPress_Create
+        - ConsensusPress_Async
+        - ConsensusPress_Meta_Box
+        - ConsensusPress_Rescue
+        - ConsensusPress_Usage
+    - step: 4
+      actor: user
+      action: "WordPress redirects to Settings page (first-run)"
+  success_state: "Plugin active. Settings page visible. API key field empty."
+
+# =============================================================================
+# FLOW 2: SETTINGS — API KEY CONFIGURATION
+# =============================================================================
+flow_settings:
+  trigger: "User navigates to ConsensusPress > Settings"
+  steps:
+    - step: 1
+      actor: plugin
+      action: "render_settings_page() loads admin/views/settings.php"
+    - step: 2
+      actor: user
+      action: "Enters API key in password field"
+    - step: 3
+      actor: user
+      action: "Clicks 'Test Connection'"
+    - step: 4
+      actor: plugin
+      action: "consensuspress-admin.js POSTs to admin-ajax.php"
+      data: "action=consensuspress_test_connection, nonce, api_key"
+    - step: 5
+      actor: plugin
+      action: "consensuspress_ajax_test_connection() — check_ajax_referer, capability check, sanitize"
+    - step: 6
+      actor: plugin
+      action: "ConsensusPress_API::query('Connection test query', 'create')"
+    - step: 7
+      actor: server
+      action: "Returns success or error JSON"
+    - step: 8
+      actor: plugin
+      action: "wp_send_json_success or wp_send_json_error"
+    - step: 9
+      actor: plugin
+      action: "JS renders result inline below button"
+    - step: 10
+      actor: user
+      action: "Clicks 'Save Settings' — form submits via Settings API"
+    - step: 11
+      actor: wp_db
+      action: "options.php saves consensuspress_api_key to wp_options"
+  success_state: "API key saved. Test Connection shows green success."
+  error_paths:
+    empty_key: "JS blocks submission — 'API key is required'"
+    invalid_key: "Server returns 401 → JS shows 'Invalid API key'"
+    server_down: "wp_remote_post returns WP_Error → 'Connection failed'"
+
+# =============================================================================
+# FLOW 3: CREATE MODE — FULL ASYNC FLOW
+# =============================================================================
+flow_create:
+  trigger: "User navigates to ConsensusPress > Create Post"
+  phases:
+
+    phase_1_submission:
+      steps:
+        - step: 1
+          actor: plugin
+          action: "ConsensusPress_Create::render_create_page() loads admin/views/create.php"
+        - step: 2
+          actor: user
+          action: "Enters topic (min 10 chars) + optional context. Clicks 'Generate Consensus Draft'"
+        - step: 3
+          actor: plugin
+          action: "consensuspress-create.js — disables button, shows spinner"
+        - step: 4
+          actor: plugin
+          action: "AJAX POST: action=consensuspress_create_post, nonce, topic, context"
+        - step: 5
+          actor: plugin
+          action: "consensuspress_ajax_create_post() handler fires"
+          checks:
+            - "check_ajax_referer('consensuspress_create_post', 'nonce')"
+            - "current_user_can('edit_posts')"
+            - "strlen(topic) >= 10"
+            - "get_option('consensuspress_api_key') not empty"
+            - "ConsensusPress_Usage::check_quota('create') — 1 credit available?"
+        - step: 6
+          actor: plugin
+          action: "ConsensusPress_Async::schedule_job(topic, context) — generates UUID job_id"
+        - step: 7
+          actor: wp_db
+          action: "set_transient('consensuspress_job_{uuid}', {status:'pending', mode:'create', ...}, 7200)"
+        - step: 8
+          actor: plugin
+          action: "wp_schedule_single_event(time()+5, 'consensuspress_process_job', [job_id])"
+        - step: 9
+          actor: plugin
+          action: "wp_send_json_success({job_id: uuid})"
+        - step: 10
+          actor: plugin
+          action: "JS receives job_id — begins polling loop"
+
+    phase_2_processing:
+      steps:
+        - step: 11
+          actor: wp_cron
+          action: "Next page visit triggers WP-Cron → consensuspress_process_job(job_id) fires"
+        - step: 12
+          actor: plugin
+          action: "ConsensusPress_Async::process_job(job_id)"
+        - step: 13
+          actor: wp_db
+          action: "Transient updated: status='processing'"
+        - step: 14
+          actor: plugin
+          action: "ConsensusPress_API::query(topic, 'create', context)"
+          detail: "wp_remote_post to app.seekrates-ai.com/api/v1/cp/consensus — timeout 120s"
+        - step: 15
+          actor: server
+          action: "Queries 5 LLMs. Quality scoring. Refusal detection. Champion selection. Oracle Risk. Returns JSON."
+        - step: 16
+          actor: plugin
+          action: "ConsensusPress_Post_Builder::create_draft(api_data, 'create')"
+          sub_steps:
+            - "wp_insert_post() — creates draft"
+            - "inject_rank_math_meta() — 6 RM fields"
+            - "inject_consensus_meta() — 6 _consensuspress_* fields"
+            - "inject_schema_meta() — FAQ + Article JSON-LD"
+            - "sideload_featured_image() — Unsplash URL → WP media library"
+        - step: 17
+          actor: plugin
+          action: "ConsensusPress_Usage::record_usage('create') — increments credits_used by 1"
+        - step: 18
+          actor: wp_db
+          action: "Transient updated: status='complete', post_id, edit_url"
+
+    phase_3_polling:
+      steps:
+        - step: 19
+          actor: plugin
+          action: "JS polls every 5s: action=consensuspress_poll_job, nonce, job_id"
+        - step: 20
+          actor: plugin
+          action: "consensuspress_ajax_poll_job() — reads transient, returns status"
+        - step: 21
+          actor: plugin
+          action: "JS receives status=complete, edit_url"
+        - step: 22
+          actor: plugin
+          action: "JS shows success message → redirects to draft edit screen after 2s"
+        - step: 23
+          actor: user
+          action: "Reviews draft. Consensus meta box visible. Edits if needed. Publishes."
+
+  success_state: "Draft post created with full SEO metadata, featured image, schema markup."
+  error_paths:
+    quota_exceeded:
+      gate: "step 5 — check_quota returns false"
+      response: "wp_send_json_error({message:'Monthly limit reached', upgrade_url:...})"
+      js_behaviour: "Shows upgrade prompt. Button re-enabled."
+    api_error:
+      gate: "step 14/15 — wp_remote_post fails or server returns error"
+      response: "Transient updated: status='failed', error message"
+      js_behaviour: "Poll receives failed → shows error message, re-enables button"
+    server_402:
+      gate: "HTTP 402 from server"
+      action: "ConsensusPress_Async::handle_quota_exceeded() — syncs credits_used to limit"
+      result: "Hard block. User must upgrade."
+    topic_too_short:
+      gate: "step 2 (JS) + step 5 (PHP)"
+      response: "JS: prevents submit. PHP: wp_send_json_error if bypass attempted."
+    timeout:
+      gate: "24 polls × 5s = 120s with no complete"
+      js_behaviour: "Shows timeout message. Suggests checking Posts list."
+
+# =============================================================================
+# FLOW 4: RESCUE MODE — FULL ASYNC FLOW
+# =============================================================================
+flow_rescue:
+  trigger: "User navigates to ConsensusPress > Rescue Post"
+  phases:
+
+    phase_1_submission:
+      steps:
+        - step: 1
+          actor: plugin
+          action: "ConsensusPress_Rescue::render_rescue_page() loads admin/views/rescue.php"
+        - step: 2
+          actor: plugin
+          action: "ConsensusPress_Rescue::get_published_posts() — fetches published posts for dropdown"
+        - step: 3
+          actor: user
+          action: "Selects published post from dropdown. Clicks 'Rescue Post'."
+        - step: 4
+          actor: plugin
+          action: "consensuspress-rescue.js — disables button, shows spinner"
+        - step: 5
+          actor: plugin
+          action: "AJAX POST: action=consensuspress_rescue_post, nonce, post_id"
+        - step: 6
+          actor: plugin
+          action: "consensuspress_ajax_rescue_post() handler fires"
+          checks:
+            - "check_ajax_referer('consensuspress_rescue_post', 'nonce')"
+            - "current_user_can('edit_posts')"
+            - "absint(post_id) valid"
+            - "ConsensusPress_Usage::check_quota('rescue') — 2 credits available?"
+        - step: 7
+          actor: plugin
+          action: "ConsensusPress_Rescue::extract_post_content(post_id) — strips shortcodes, max 50,000 chars"
+        - step: 8
+          actor: plugin
+          action: "ConsensusPress_Async::schedule_rescue_job(post_id, content_html)"
+        - step: 9
+          actor: wp_db
+          action: "Transient set: status='pending', mode='rescue', post_id, content_html"
+        - step: 10
+          actor: plugin
+          action: "wp_send_json_success({job_id: uuid})"
+        - step: 11
+          actor: plugin
+          action: "JS begins polling with pollNonce"
+
+    phase_2_processing:
+      steps:
+        - step: 12
+          actor: wp_cron
+          action: "consensuspress_process_job(job_id) fires"
+        - step: 13
+          actor: plugin
+          action: "ConsensusPress_Async::process_job() — detects mode='rescue'"
+        - step: 14
+          actor: plugin
+          action: "ConsensusPress_API::query(content_html, 'rescue')"
+        - step: 15
+          actor: server
+          action: "Analyses content for GEO/LLMO/AEO gaps. Restructures via 5-LLM consensus. Returns JSON."
+        - step: 16
+          actor: plugin
+          action: "Captures original_post_id before overwrite"
+        - step: 17
+          actor: plugin
+          action: "ConsensusPress_Post_Builder::create_draft(api_data, 'rescue') — creates NEW draft"
+          note: "Original post is NEVER modified (D-04-01)"
+        - step: 18
+          actor: wp_db
+          action: "update_post_meta(draft_id, '_consensuspress_original_post_id', original_post_id)"
+        - step: 19
+          actor: plugin
+          action: "ConsensusPress_Usage::record_usage('rescue') — increments credits_used by 2"
+        - step: 20
+          actor: wp_db
+          action: "Transient updated: status='complete', post_id=draft_id, edit_url, diff_url"
+
+    phase_3_review:
+      steps:
+        - step: 21
+          actor: plugin
+          action: "JS polls → receives complete → redirects to diff view"
+        - step: 22
+          actor: plugin
+          action: "admin/views/diff.php — reads original + rescued content side by side"
+          data_reads:
+            - "get_post(rescued_post_id) — rescued content"
+            - "get_post_meta(rescued_id, '_consensuspress_original_post_id') — original_post_id"
+            - "get_post(original_post_id) — original content"
+        - step: 23
+          actor: user
+          action: "Reviews diff. Decides to publish rescued draft or discard."
+
+  success_state: "Rescued draft created. Original post untouched. Diff view shows before/after."
+  error_paths:
+    quota_exceeded: "check_quota returns false for rescue (needs 2 credits) → upgrade prompt"
+    content_too_long: "extract_post_content truncates at 50,000 chars — no error, silent truncation"
+    api_error: "Same as Create — transient marked failed, JS shows error"
+
+# =============================================================================
+# FLOW 5: USAGE TRACKING & TIER ENFORCEMENT
+# =============================================================================
+flow_usage:
+  storage: "wp_options key: consensuspress_usage (serialised array)"
+
+  read_path:
+    - "ConsensusPress_Usage::get_usage() called"
+    - "auto_reset_if_needed() — if time() > strtotime(reset_date): zero credits_used, set reset_date=+30days"
+    - "Returns current state"
+
+  check_quota_path:
+    - "check_quota(mode) called in AJAX handler (before job scheduling)"
+    - "get_usage() — triggers auto-reset if needed"
+    - "cost = CREDIT_COST[mode] (create=1, rescue=2)"
+    - "if credits_used + cost > credits_limit → return false (block)"
+    - "return true (allow)"
+
+  record_usage_path:
+    - "record_usage(mode) called after successful draft creation"
+    - "credits_used += CREDIT_COST[mode]"
+    - "last_updated = now"
+    - "update_option('consensuspress_usage', state)"
+
+  hard_enforcement_path:
+    - "Server returns HTTP 402"
+    - "handle_quota_exceeded(server_data) called"
+    - "credits_used = max(credits_used, credits_limit)"
+    - "If server_data has tier/limit: update local state to match"
+    - "Blocks all further operations until reset or upgrade"
+
+  admin_notice_path:
+    - "ConsensusPress_Usage::init() hooks admin_notices"
+    - "render_usage_notice() fires on every admin page load"
+    - "get_current_screen() — only show on ConsensusPress pages"
+    - "pct = credits_used / credits_limit * 100"
+    - "if pct >= 100: show 'Monthly limit reached' (red)"
+    - "if pct >= 80: show 'X credits remaining' (yellow)"
+    - "else: no notice"
+
+# =============================================================================
+# FLOW 6: POST EDIT SCREEN — META BOX
+# =============================================================================
+flow_meta_box:
+  trigger: "User opens any post in the WordPress editor"
+  steps:
+    - step: 1
+      actor: plugin
+      action: "ConsensusPress_Meta_Box::add_meta_boxes() fires on add_meta_boxes hook"
+    - step: 2
+      actor: plugin
+      action: "add_meta_box() registers 'consensuspress-data' on post edit screen"
+    - step: 3
+      actor: plugin
+      action: "ConsensusPress_Meta_Box::render_meta_box() reads post_meta"
+      data_read:
+        - "_consensuspress_score"
+        - "_consensuspress_mode"
+        - "_consensuspress_champion_provider"
+        - "_consensuspress_agreement_level"
+        - "_consensuspress_oracle_risk_level"
+        - "_consensuspress_created_at"
+    - step: 4
+      actor: plugin
+      action: "If score present → load admin/views/meta-box.php with data"
+      action_empty: "If no score → load admin/views/meta-box-empty.php"
+  display:
+    with_data: "Score/100, agreement level, oracle risk, champion provider, mode, date"
+    without_data: "Empty state message + link to Create page"
+
+# =============================================================================
+# FLOW 7: PLUGIN UNINSTALL
+# =============================================================================
+flow_uninstall:
+  trigger: "User deletes plugin from Plugins page (not deactivate — delete)"
+  steps:
+    - step: 1
+      actor: plugin
+      action: "WordPress calls uninstall.php"
+    - step: 2
+      actor: plugin
+      action: "Checks defined('WP_UNINSTALL_PLUGIN') — security gate"
+    - step: 3
+      actor: wp_db
+      action: "delete_option('consensuspress_api_key')"
+    - step: 4
+      actor: wp_db
+      action: "delete_option('consensuspress_post_status')"
+    - step: 5
+      actor: wp_db
+      action: "delete_option('consensuspress_usage')"
+    - step: 6
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_score')"
+    - step: 7
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_mode')"
+    - step: 8
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_champion_provider')"
+    - step: 9
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_agreement_level')"
+    - step: 10
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_oracle_risk_level')"
+    - step: 11
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_created_at')"
+    - step: 12
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_original_post_id')"
+    - step: 13
+      actor: wp_db
+      action: "delete_post_meta_by_key('rank_math_focus_keyword') — only CP-generated posts"
+      note: "Rank Math keys deleted from CP-created posts only (via _consensuspress_mode meta)"
+    - step: 14
+      actor: wp_db
+      action: "delete_post_meta_by_key('_consensuspress_schema_faq')"
+  success_state: "No trace in wp_options. No _consensuspress_* meta remains."
+
+# =============================================================================
+# ASYNC JOB STATE MACHINE
+# =============================================================================
+job_state_machine:
+  states:
+    - pending: "Job scheduled. WP-Cron not yet fired."
+    - processing: "process_job() is executing. API call in progress."
+    - complete: "Draft created. post_id and edit_url stored in transient."
+    - failed: "API error or exception. Error message stored in transient."
+
+  transitions:
+    - from: pending
+      to: processing
+      trigger: "WP-Cron fires process_job()"
+    - from: processing
+      to: complete
+      trigger: "API returns success + create_draft() succeeds"
+    - from: processing
+      to: failed
+      trigger: "API error, WP_Error, exception, or HTTP 4xx/5xx"
+
+  transient_structure:
+    key: "consensuspress_job_{uuid}"
+    ttl: 7200
+    fields:
+      status: "pending|processing|complete|failed"
+      mode: "create|rescue"
+      topic: "string (create only)"
+      context: "string (create only)"
+      post_id: "int (original for rescue, draft post_id when complete)"
+      content_html: "string (rescue only)"
+      edit_url: "string (when complete)"
+      error: "array{code, message} (when failed)"
+
+# =============================================================================
+# CREDIT COST MATRIX
+# =============================================================================
+credit_cost_matrix:
+  create: 1
+  rescue: 2
+
+  tiers:
+    free:       { monthly_credits: 3,      approx_posts: "3 create OR 1 rescue" }
+    starter:    { monthly_credits: 10,     approx_posts: "10 create OR 5 rescue" }
+    pro:        { monthly_credits: 30,     approx_posts: "30 create OR 15 rescue" }
+    business:   { monthly_credits: 100,    approx_posts: "100 create OR 50 rescue" }
+    agency:     { monthly_credits: 50,     approx_posts: "50 create OR 25 rescue" }
+    enterprise: { monthly_credits: 200,    approx_posts: "200 create OR 100 rescue" }
+    unlimited:  { monthly_credits: 999999, approx_posts: "Unlimited" }
+
+# =============================================================================
+# END OF PROCESS FLOW
+# =============================================================================

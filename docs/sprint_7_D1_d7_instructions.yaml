@@ -1,0 +1,1305 @@
+# =============================================================================
+# SPRINT 7: RAILWAY ENDPOINT + POST-BUILDER CONTENT PIPELINE — D1-D7 SPEC
+# =============================================================================
+# Project:  ConsensusPress by Seekrates
+# Sprint:   7 (new — inserted before WordPress.org packaging sprint)
+# Author:   D-C (Session 08)
+# Date:     2026-03-03
+# Method:   AFD v1.3.0
+# HLR ref:  Build Sequence Steps 1 (server endpoint) + 4-5 (plugin post-builder)
+# =============================================================================
+# SCOPE:
+#   Part A — Railway FastAPI Endpoint (Python)
+#     New file: src/api/consensuspress_endpoints.py
+#     One line:  src/server/main.py (router registration)
+#     Patch:     class-consensuspress-api.php (T&C gate handling)
+#
+#   Part B — Plugin Post-Builder Content Pipeline (PHP)
+#     Revised:   class-consensuspress-post-builder.php v2.0.0
+#     Purpose:   Accept real engine ConsensusResult field structure.
+#                Generate content_html, metadata, schema in PHP (replaces
+#                seekrates_publisher content_formatter.py + seo_optimizer.py).
+#     Revised:   consensuspress_mock_api.yaml v2.0.0 (field names updated)
+#
+# ARCHITECTURE DECISIONS (from Session 08 analysis):
+#   D-08-03: Synchronous JSON (Option A) — plugin holds connection, server returns
+#   D-08-04: Auth via user_manager.py session token (Option A)
+#   D-08-05: T&C gate handled in plugin, not bypassed server-side
+#   D-08-06: All content production (HTML/SEO/schema) done in PHP post-builder
+#   D-08-07: Unsplash fetch deferred — Sprint 7 post-builder sets $featured_image=[]
+#            gracefully (sideload_featured_image is preserved, just not called)
+#
+# ROOT CAUSE OF THIS SPRINT (HAL-008 resolution):
+#   consensuspress_mock_api.yaml v1.0.0 assumed server returns pre-built
+#   content_html, metadata.focus_keyword, schema_markup, featured_image.url.
+#   Actual generate_expert_panel_response_v4() returns raw consensus analysis
+#   only. seekrates_publisher was the content production pipeline.
+#   ConsensusPress replaces seekrates_publisher — so the plugin does the work.
+#
+# KEY FIELD MAPPING (engine model_dump() → PHP $api_data):
+#   consensus.convergence_percentage → consensus score %
+#   consensus.consensus_confidence   → HIGH|MODERATE|LOW
+#   consensus.champion               → champion provider name
+#   consensus.champion_score         → champion quality score
+#   consensus.consensus_text         → raw synthesis text (basis for paragraphs)
+#   consensus.reached                → bool
+#   providers[].provider             → provider name
+#   providers[].answer               → raw LLM response text
+#   providers[].score                → quality score
+#   providers[].confidence           → float
+#   providers[].is_refusal           → bool
+#   divergence.common_themes[]       → points_of_agreement equivalent
+#   divergence.outliers[]            → points_of_divergence equivalent
+#   risk_analysis                    → Oracle tier only (may be null)
+#   query                            → added by endpoint to data dict (not in Pydantic model)
+#
+# OUT OF SCOPE:
+#   WordPress.org packaging (Sprint 8)
+#   Unsplash featured image fetch (Sprint 8 enhancement)
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# D0: PRESERVATION CONTRACTS — DO NOT BREAK
+# =============================================================================
+# All existing tests from Sprints 1-5 must pass after Sprint 7.
+# Sprint 7 does NOT change: async, rescue, diff, usage, meta box, settings.
+# =============================================================================
+d0_preservation:
+  rule: "All existing tests preserved. Zero regressions permitted."
+
+  # ---------------------------------------------------------------------------
+  # PART A — Python files (Railway server — read-only from plugin perspective)
+  # ---------------------------------------------------------------------------
+  railway_files:
+
+    - file: "src/api/consensuspress_endpoints.py"
+      status: "NEW — no preservation contract"
+
+    - file: "src/server/main.py"
+      modification: "ADD one line: app.include_router(consensuspress_router)"
+      preservation: "ALL existing routes and startup code unchanged"
+      risk: "None — additive only"
+
+  # ---------------------------------------------------------------------------
+  # PART B — PHP plugin files
+  # ---------------------------------------------------------------------------
+  plugin_files_modified:
+
+    - file: "includes/class-consensuspress-post-builder.php"
+      current_version: "1.0.0"
+      new_version: "2.0.0"
+      public_interface_preserved: true
+      note: |
+        PUBLIC method signature UNCHANGED:
+          create_draft( array $api_data, string $mode = 'create' ): array
+        CALLERS (class-consensuspress-async.php, tests) need NO changes.
+        INTERNAL: validate_api_data(), inject_consensus_meta() updated for
+        new field paths. generate_content_pipeline() is new private method.
+        All other private methods preserved with identical signatures.
+      preserved_public_methods:
+        - "create_draft( array $api_data, string $mode = 'create' ): array"
+      preserved_private_methods:
+        - "inject_rank_math_meta( int $post_id, array $metadata, array $schema_markup ): void"
+        - "sideload_featured_image( int $post_id, array $featured_image ): bool"
+        - "assign_taxonomy_terms( int $post_id, array $metadata ): void"
+      updated_private_methods:
+        - "validate_api_data( array $api_data ): bool  — new required key set"
+        - "inject_consensus_meta( int $post_id, array $api_data, string $mode ): void — new field paths"
+      new_private_methods:
+        - "generate_content_pipeline( array $api_data ): array"
+        - "extract_focus_keyword( string $query ): string"
+        - "generate_seo_title( string $focus_keyword ): string"
+        - "generate_meta_description( string $synthesis, float $consensus_pct, string $focus_keyword ): string"
+        - "chunk_paragraphs( string $text, int $target_words = 50 ): array"
+        - "extract_insights( string $synthesis, array $paragraphs ): array"
+        - "build_content_html( array $vars ): string"
+        - "generate_faq_schema( string $query, string $synthesis, string $focus_keyword ): array"
+        - "generate_article_schema( string $seo_title, string $meta_description ): array"
+        - "get_champion_answer( array $providers, string $champion_name ): string"
+        - "convert_plain_to_html_paragraphs( string $text ): string"
+
+    - file: "includes/class-consensuspress-api.php"
+      current_version: "1.0.0"
+      new_version: "1.1.0"
+      modification: |
+        ADD needs_tc_acceptance handler in query() method.
+        Position: BEFORE the existing 'empty($parsed['success'])' check.
+        NO other changes. Signature unchanged.
+      preserved_methods:
+        - "query( string $query, string $mode, string $context = '' ): array"
+
+  plugin_files_not_modified:
+    - "consensuspress.php"
+    - "includes/class-consensuspress-async.php"
+    - "includes/class-consensuspress-create.php"
+    - "includes/class-consensuspress-rescue.php"
+    - "includes/class-consensuspress-meta-box.php"
+    - "includes/class-consensuspress-settings.php"
+    - "includes/class-consensuspress-usage.php"
+    - "includes/class-consensuspress-diff.php"
+    - "includes/interface-consensuspress-transport.php"
+    - "admin/views/create.php"
+    - "admin/views/rescue.php"
+    - "admin/views/settings.php"
+    - "admin/js/consensuspress-admin.js"
+    - "admin/css/consensuspress-admin.css"
+
+# =============================================================================
+# D1: TYPE CONTRACTS
+# =============================================================================
+d1_type_contracts:
+
+  # ---------------------------------------------------------------------------
+  # PART A: Python types (consensuspress_endpoints.py)
+  # ---------------------------------------------------------------------------
+  python_types:
+
+    ConsensusPressRequest:
+      kind: "Pydantic BaseModel"
+      fields:
+        - "query: str  # min_length=10, max_length=50000"
+        - "mode: str   # Literal['create', 'rescue']"
+        - "context: str = ''  # max_length=2000"
+      rationale: "Request body for POST /api/v1/consensus"
+
+    ConsensusPressResponse:
+      kind: "Dict returned directly (not Pydantic)"
+      structure: |
+        {
+          "success": bool,
+          "data": dict   # ConsensusResult.model_dump() + {"query": str}
+        }
+      note: |
+        data contains the full ConsensusResult model_dump() with query injected.
+        No additional transformation. Existing ConsensusResult model unchanged.
+
+    ErrorResponse:
+      kind: "Dict returned via JSONResponse"
+      structure: |
+        {
+          "success": False,
+          "error": {"code": str, "message": str}
+        }
+
+  # ---------------------------------------------------------------------------
+  # PART B: PHP PHPDoc shapes (post-builder)
+  # ---------------------------------------------------------------------------
+  php_shapes:
+
+    api_data_input:
+      description: "New shape of $api_data received by create_draft() — engine real output"
+      phpdoc_shape: |
+        array{
+            query: string,                 // Original query (injected by endpoint)
+            consensus: array{
+                champion: string,          // Provider name e.g. 'openai'
+                champion_score: int,       // Quality score 0-100
+                convergence_percentage: float,  // Agreement % 0-100
+                consensus_confidence: string,   // 'HIGH'|'MODERATE'|'LOW'
+                reached: bool,
+                consensus_text: string,    // Plain text synthesis
+                consensus_panel: string,   // HTML panel (NOT used for blog)
+                agreement_percentage: float,
+            },
+            providers: list<array{
+                provider: string,
+                answer: string,            // Raw LLM response text
+                score: int,
+                confidence: float,
+                is_refusal: bool,
+                status: string,
+            }>,
+            divergence: array{
+                common_themes: list<string>,   // → points_of_agreement
+                outliers: list<string>,        // → points_of_divergence
+                personality_quotes: array,
+                article_hook: string,
+                theme_coverage: array,
+            }|null,
+            risk_analysis: array{
+                assumptions: list<string>,
+                failure_modes: list<string>,
+                contrarian_argument: string,
+                contrarian_significance: string,
+                contrarian_reasoning: string,
+                oracle_recommendation: string,
+                validation_checklist: list<string>,
+            }|null,
+            correlation_id: string,
+            tier: string,
+        }
+
+    generated_pipeline_output:
+      description: "Return shape of generate_content_pipeline()"
+      phpdoc_shape: |
+        array{
+            content_html: string,
+            metadata: array{
+                focus_keyword: string,
+                seo_title: string,
+                meta_description: string,
+                suggested_title: string,
+                categories: list<string>,
+                tags: list<string>,
+            },
+            schema_markup: array{
+                faq: array,
+                article: array,
+            },
+            featured_image: array,  // Empty array — Unsplash deferred Sprint 8
+        }
+
+    create_draft_return:
+      description: "Return shape of create_draft() — UNCHANGED from Sprint 2"
+      phpdoc_shape: |
+        array{
+            success: bool,
+            post_id: int,
+            edit_url: string,
+            message: string,
+        }
+
+# =============================================================================
+# D2: DOUBLE-ENTRY CONTRACTS (OUTPUT/INPUT BALANCE)
+# =============================================================================
+d2_contracts:
+
+  # Part A: Railway endpoint contracts
+
+  contract_A1:
+    label: "Plugin → Railway"
+    output:
+      producer: "ConsensusPress_API::query() in class-consensuspress-api.php"
+      data: "POST body: {query, mode, context} + Bearer token header"
+    input:
+      consumer: "consensuspress_endpoint() in consensuspress_endpoints.py"
+      reads: "ConsensusPressRequest.query, .mode, .context + Authorization header"
+    balance: "BALANCED"
+
+  contract_A2:
+    label: "Railway → Plugin"
+    output:
+      producer: "consensuspress_endpoint() returns JSON"
+      data: '{"success": true, "data": {ConsensusResult fields + "query": str}}'
+    input:
+      consumer: "ConsensusPress_API::query() parses $parsed['success'] and $parsed['data']"
+      reads: "$parsed['success'] bool, $parsed['data'] array"
+    balance: "BALANCED"
+
+  contract_A3:
+    label: "T&C gate response"
+    output:
+      producer: "Seekrates server — existing T&C gate in consensus_guest_endpoint pattern"
+      data: '{"status": "needs_tc_acceptance", "message": "...", "tc_url": "..."}'
+    input:
+      consumer: "NEW: T&C handler in ConsensusPress_API::query()"
+      reads: "$parsed['status'] === 'needs_tc_acceptance', $parsed['tc_url']"
+    balance: "BALANCED — new handler added"
+
+  # Part B: Plugin post-builder contracts
+
+  contract_B1:
+    label: "Async → Post-Builder (public interface UNCHANGED)"
+    output:
+      producer: "ConsensusPress_Async::process_job() calls $builder->create_draft($result['data'], $mode)"
+      data: "$result['data'] = $parsed['data'] from API response"
+    input:
+      consumer: "ConsensusPress_Post_Builder::create_draft( array $api_data, string $mode )"
+      reads: "New $api_data shape (D1 api_data_input)"
+    balance: "BALANCED — same signature, new field paths inside"
+
+  contract_B2:
+    label: "Post-Builder → Content Pipeline"
+    output:
+      producer: "create_draft() calls generate_content_pipeline( $api_data )"
+      data: "$api_data (full engine response)"
+    input:
+      consumer: "generate_content_pipeline() reads consensus, providers, divergence, query"
+      reads: "All fields in D1 api_data_input shape"
+    balance: "BALANCED"
+
+  contract_B3:
+    label: "Content Pipeline → WordPress"
+    output:
+      producer: "generate_content_pipeline() returns array (D1 generated_pipeline_output)"
+      data: "content_html, metadata, schema_markup, featured_image"
+    input:
+      consumer: "create_draft() passes to wp_insert_post, inject_rank_math_meta, etc."
+      reads: "$generated['content_html'], $generated['metadata'], $generated['schema_markup']"
+    balance: "BALANCED"
+
+  contract_B4:
+    label: "Post-Builder → Meta Box (UNCHANGED from Sprint 2)"
+    output:
+      producer: "inject_consensus_meta() — updated field path reads but same meta keys written"
+      data: "6 post_meta keys: CONSENSUS_META_KEYS"
+    input:
+      consumer: "ConsensusPress_Meta_Box reads same 6 keys"
+      reads: "_consensuspress_score, _mode, _champion_provider, _agreement_level, _oracle_risk_level, _created_at"
+    balance: "BALANCED — meta key names unchanged, source paths updated"
+
+  contract_B5:
+    label: "Mock fixture → test-post-builder.php"
+    output:
+      producer: "consensuspress_mock_api.yaml v2.0.0 fixture_create_success"
+      data: "Updated JSON with real engine field paths"
+    input:
+      consumer: "test-post-builder.php fixture loading"
+      reads: "Same fixture, updated field names"
+    balance: "BALANCED — tests updated alongside fixture"
+
+# =============================================================================
+# D3: FORMAT CONTRACTS
+# =============================================================================
+d3_format_contracts:
+  llm_functions_present: false
+  note: |
+    No LLM calls in either Part A or Part B.
+    Part A calls generate_expert_panel_response_v4() which is an existing
+    production function — its format contract is an existing concern.
+    Part B is pure PHP string manipulation and JSON construction.
+
+# =============================================================================
+# D4: FUNCTION SPECIFICATIONS
+# =============================================================================
+d4_functions:
+
+  # ===========================================================================
+  # PART A: consensuspress_endpoints.py
+  # ===========================================================================
+  part_a_railway:
+
+    # -------------------------------------------------------------------------
+    # FILE: src/api/consensuspress_endpoints.py (NEW)
+    # -------------------------------------------------------------------------
+
+    module_structure: |
+      from fastapi import APIRouter, Depends, HTTPException
+      from fastapi.responses import JSONResponse
+      from pydantic import BaseModel, validator
+      from typing import Optional
+      from src.agents.consensus_engine import generate_expert_panel_response_v4
+      from src.auth.user_manager import UserManager
+
+      router = APIRouter(prefix="/api/v1", tags=["consensuspress"])
+      user_manager = UserManager()
+
+    ConsensusPressRequest_model: |
+      class ConsensusPressRequest(BaseModel):
+          query: str
+          mode: str = "create"          # 'create' | 'rescue'
+          context: str = ""
+          
+          @validator('query')
+          def query_min_length(cls, v):
+              if len(v.strip()) < 10:
+                  raise ValueError('Query must be at least 10 characters')
+              return v
+          
+          @validator('mode')
+          def mode_valid(cls, v):
+              if v not in ('create', 'rescue'):
+                  raise ValueError("Mode must be 'create' or 'rescue'")
+              return v
+
+    consensuspress_endpoint:
+      signature: |
+        @router.post("/consensus")
+        async def consensuspress_endpoint(
+            request: ConsensusPressRequest,
+            authorization: Optional[str] = Header(None)
+        ) -> dict
+      purpose: "ConsensusPress plugin endpoint — authenticated, returns JSON"
+      body_logic: |
+        1. Validate Bearer token via user_manager.validate_session(token)
+           - Extract token from 'Bearer {token}' header
+           - If no header or invalid: raise HTTPException(401)
+        2. Check T&C acceptance via check_tc_acceptance(user_email)
+           - If not accepted: return JSONResponse(200, {"status": "needs_tc_acceptance",
+             "message": "Please accept Terms & Conditions", "tc_url": "..."})
+        3. Check tier limits via check_tier_limits(user_email, get_queries_today(user_email))
+           - If exceeded: raise HTTPException(402, detail=message)
+        4. Call: result = await generate_expert_panel_response_v4(
+               query=request.query,
+               providers=['openai', 'claude', 'gemini', 'mistral', 'cohere'],
+               tier=user_tier
+           )
+        5. data = result.model_dump()
+        6. data['query'] = request.query      # inject query — not in Pydantic model
+        7. data['mode'] = request.mode        # inject mode for plugin context
+        8. return {"success": True, "data": data}
+      error_handling:
+        401: "Invalid/missing Bearer token"
+        402: "Tier limit exceeded — HTTPException with tier/limit in detail"
+        422: "Pydantic validation error (FastAPI auto-handles)"
+        500: "Engine failure — catch Exception, log, raise HTTPException(500)"
+      phpdoc: "Python: standard FastAPI docstring"
+      note: |
+        T&C gate uses same check_tc_acceptance() function as consensus_guest_endpoint.
+        Import it from the same location as in auth_endpoints.py.
+        Tier lookup uses get_user_tier_by_email(user_email) — same import.
+        ALL imports must come from existing auth_endpoints.py import block.
+        DO NOT invent new imports or functions.
+
+    main_py_modification: |
+      In src/server/main.py, after existing router includes, ADD:
+        from src.api.consensuspress_endpoints import router as consensuspress_router
+        app.include_router(consensuspress_router)
+      ONE import line + ONE include_router line. Nothing else changed.
+
+    # -------------------------------------------------------------------------
+    # PATCH: class-consensuspress-api.php (T&C gate)
+    # -------------------------------------------------------------------------
+    api_php_patch:
+      file: "includes/class-consensuspress-api.php"
+      location: "In query() method, AFTER $status and $parsed are set, BEFORE existing 401 check"
+      insert: |
+        // T&C gate — HTTP 200 with needs_tc_acceptance body (not an error)
+        if ( 200 === $status && isset( $parsed['status'] ) && 'needs_tc_acceptance' === $parsed['status'] ) {
+            return array(
+                'success'     => false,
+                'data'        => null,
+                'error'       => array(
+                    'code'    => 'needs_tc_acceptance',
+                    'message' => 'Please accept Seekrates AI Terms & Conditions to use ConsensusPress.',
+                    'tc_url'  => esc_url_raw( $parsed['tc_url'] ?? 'https://seekrates-ai.com/website-t-c/' ),
+                ),
+                'http_status' => 200,
+            );
+        }
+      position_anchor: |
+        Insert AFTER this line:
+          $parsed = json_decode( $response['body'] ?? '', true );
+        Insert BEFORE this block:
+          if ( 401 === $status ) {
+
+  # ===========================================================================
+  # PART B: class-consensuspress-post-builder.php v2.0.0
+  # ===========================================================================
+  part_b_post_builder:
+
+    # -------------------------------------------------------------------------
+    # validate_api_data — UPDATED required keys
+    # -------------------------------------------------------------------------
+    validate_api_data:
+      signature: "private function validate_api_data( array $api_data ): bool"
+      purpose: "Check all required top-level keys exist — updated for real engine shape"
+      body_logic: |
+        $required_top = array( 'consensus', 'providers', 'correlation_id' );
+        foreach ( $required_top as $key ) {
+            if ( ! array_key_exists( $key, $api_data ) ) { return false; }
+        }
+        // Validate consensus sub-keys
+        $required_consensus = array( 'champion', 'champion_score', 'convergence_percentage',
+                                     'consensus_confidence', 'reached', 'consensus_text' );
+        foreach ( $required_consensus as $key ) {
+            if ( ! isset( $api_data['consensus'][ $key ] ) ) { return false; }
+        }
+        // Validate providers is non-empty array
+        if ( ! is_array( $api_data['providers'] ) || empty( $api_data['providers'] ) ) {
+            return false;
+        }
+        return true;
+
+    # -------------------------------------------------------------------------
+    # generate_content_pipeline — NEW master content generation method
+    # -------------------------------------------------------------------------
+    generate_content_pipeline:
+      signature: "private function generate_content_pipeline( array $api_data ): array"
+      purpose: |
+        PHP equivalent of seekrates_publisher content_formatter.py + seo_optimizer.py.
+        Generates ALL content from raw engine data. No LLM calls.
+      return_type: "array (see D1 generated_pipeline_output)"
+      body_logic: |
+        $query       = sanitize_text_field( $api_data['query'] ?? '' );
+        $synthesis   = $api_data['consensus']['consensus_text'] ?? '';
+        $consensus_pct = (float) ( $api_data['consensus']['convergence_percentage'] ?? 0 );
+        $champion_name = sanitize_text_field( $api_data['consensus']['champion'] ?? '' );
+        $champion_score = (int) ( $api_data['consensus']['champion_score'] ?? 0 );
+        $agreement_level = sanitize_text_field( $api_data['consensus']['consensus_confidence'] ?? 'LOW' );
+        $agent_count = count( $api_data['providers'] ?? array() );
+
+        // --- Derive SEO metadata ---
+        $focus_keyword   = $this->extract_focus_keyword( $query );
+        $seo_title       = $this->generate_seo_title( $focus_keyword );
+        $meta_description = $this->generate_meta_description( $synthesis, $consensus_pct, $focus_keyword );
+        $suggested_title = $seo_title;
+
+        // --- Content pipeline ---
+        $paragraphs    = $this->chunk_paragraphs( $synthesis );
+        $champion_answer = $this->get_champion_answer( $api_data['providers'], $champion_name );
+        $insights      = $this->extract_insights( $synthesis, $paragraphs );
+        $agreement_pts = array_slice( $api_data['divergence']['common_themes'] ?? array(), 0, 5 );
+        $divergence_pts = array_slice( $api_data['divergence']['outliers'] ?? array(), 0, 3 );
+
+        // --- Schema ---
+        $faq_schema     = $this->generate_faq_schema( $query, $synthesis, $focus_keyword );
+        $article_schema = $this->generate_article_schema( $seo_title, $meta_description );
+
+        // --- Avg confidence ---
+        $confidences = array_column( $api_data['providers'], 'confidence' );
+        $avg_confidence = ! empty( $confidences ) ? array_sum( $confidences ) / count( $confidences ) : 0.0;
+
+        // --- Build HTML ---
+        $content_html = $this->build_content_html( array(
+            'focus_keyword'      => $focus_keyword,
+            'query'              => $query,
+            'consensus_pct'      => round( $consensus_pct ),
+            'agreement_level'    => $agreement_level,
+            'agent_count'        => $agent_count,
+            'avg_confidence'     => round( $avg_confidence * 100 ),
+            'champion_name'      => strtoupper( $champion_name ),
+            'champion_score'     => $champion_score,
+            'champion_answer'    => $this->convert_plain_to_html_paragraphs( $champion_answer ),
+            'paragraphs'         => $paragraphs,
+            'insights'           => $insights,
+            'points_agreement'   => $agreement_pts,
+            'points_divergence'  => $divergence_pts,
+            'category'           => 'ai-insights',
+            'post_date'          => date( 'F j, Y' ),
+            'correlation_id'     => sanitize_text_field( $api_data['correlation_id'] ?? '' ),
+        ) );
+
+        // --- Tags from query keywords ---
+        $tags = array_filter( explode( ' ', $focus_keyword ) );
+        $tags[] = 'ai-consensus';
+        $tags[] = 'seekrates';
+
+        return array(
+            'content_html'  => $content_html,
+            'metadata'      => array(
+                'focus_keyword'    => $focus_keyword,
+                'seo_title'        => $seo_title,
+                'meta_description' => $meta_description,
+                'suggested_title'  => $suggested_title,
+                'categories'       => array( 'ai-insights' ),
+                'tags'             => array_values( array_unique( $tags ) ),
+            ),
+            'schema_markup' => array(
+                'faq'     => $faq_schema,
+                'article' => $article_schema,
+            ),
+            'featured_image' => array(),   // Unsplash deferred Sprint 8
+        );
+
+    # -------------------------------------------------------------------------
+    # extract_focus_keyword
+    # -------------------------------------------------------------------------
+    extract_focus_keyword:
+      signature: "private function extract_focus_keyword( string $query ): string"
+      purpose: "Extract 2-3 word focus keyword from query by frequency + stop-word filter"
+      body_logic: |
+        $stop_words = array(
+            'a','an','the','and','or','but','in','on','at','to','for',
+            'of','with','by','from','as','is','was','are','were','be',
+            'what','where','when','how','why','which','who','will','can',
+            'should','would','could','do','does','did','has','have','had',
+            'most','best','top','key','effective','important','about','that',
+        );
+        // Lowercase, strip punctuation, split to words
+        $clean = preg_replace('/[^\w\s]/', ' ', strtolower( $query ) );
+        $words = array_filter( explode( ' ', $clean ) );
+        // Remove stop words
+        $content_words = array_values( array_filter( $words, function( $w ) use ( $stop_words ) {
+            return strlen( $w ) > 3 && ! in_array( $w, $stop_words, true );
+        } ) );
+        // Return first 3 unique content words joined
+        $unique = array_slice( array_unique( $content_words ), 0, 3 );
+        return implode( ' ', $unique ) ?: substr( $query, 0, 30 );
+
+    # -------------------------------------------------------------------------
+    # generate_seo_title
+    # -------------------------------------------------------------------------
+    generate_seo_title:
+      signature: "private function generate_seo_title( string $focus_keyword ): string"
+      body_logic: |
+        $title = ucwords( $focus_keyword ) . ': 5 AIs Reveal Key Insights';
+        if ( strlen( $title ) > 60 ) {
+            $title = ucwords( $focus_keyword ) . ': AI Consensus Insights';
+        }
+        if ( strlen( $title ) > 60 ) {
+            $title = ucwords( $focus_keyword );
+        }
+        return $title;
+
+    # -------------------------------------------------------------------------
+    # generate_meta_description
+    # -------------------------------------------------------------------------
+    generate_meta_description:
+      signature: "private function generate_meta_description( string $synthesis, float $consensus_pct, string $focus_keyword ): string"
+      body_logic: |
+        // Take first sentence of synthesis
+        $sentences = preg_split( '/(?<=[.!?])\s+/', $synthesis, 2 );
+        $first = trim( $sentences[0] ?? $synthesis );
+        $prefix = ucwords( $focus_keyword ) . ' — ' . round( $consensus_pct ) . '% AI consensus: ';
+        $desc = $prefix . $first;
+        if ( strlen( $desc ) > 155 ) {
+            $desc = substr( $desc, 0, 152 ) . '...';
+        }
+        return $desc;
+
+    # -------------------------------------------------------------------------
+    # chunk_paragraphs
+    # -------------------------------------------------------------------------
+    chunk_paragraphs:
+      signature: "private function chunk_paragraphs( string $text, int $target_words = 50 ): array"
+      purpose: "Split synthesis text into 40-60 word paragraphs (GEO/LLMO optimisation)"
+      body_logic: |
+        $sentences = preg_split( '/(?<=[.!?])\s+/', $text );
+        $sentences = array_filter( array_map( 'trim', $sentences ) );
+        $chunks = array();
+        $current = array();
+        $current_words = 0;
+        foreach ( $sentences as $sentence ) {
+            $word_count = str_word_count( $sentence );
+            if ( $current_words >= 40 && ( $current_words + $word_count ) > 65 ) {
+                $chunks[] = implode( ' ', $current );
+                $current = array( $sentence );
+                $current_words = $word_count;
+            } else {
+                $current[] = $sentence;
+                $current_words += $word_count;
+            }
+        }
+        if ( ! empty( $current ) ) {
+            $chunks[] = implode( ' ', $current );
+        }
+        return array_values( array_filter( $chunks ) );
+
+    # -------------------------------------------------------------------------
+    # extract_insights
+    # -------------------------------------------------------------------------
+    extract_insights:
+      signature: "private function extract_insights( string $synthesis, array $paragraphs ): array"
+      purpose: "Extract 3-5 key insight strings from synthesis for the Key Insights box"
+      body_logic: |
+        // Look for sentences containing signal words
+        $signals = array( 'key', 'important', 'critical', 'must', 'essential',
+                          'recommend', 'should', 'ensure', 'requires' );
+        $insights = array();
+        $sentences = preg_split( '/(?<=[.!?])\s+/', $synthesis );
+        foreach ( $sentences as $sentence ) {
+            $lower = strtolower( $sentence );
+            foreach ( $signals as $signal ) {
+                if ( strpos( $lower, $signal ) !== false ) {
+                    $insights[] = trim( $sentence );
+                    break;
+                }
+            }
+            if ( count( $insights ) >= 5 ) { break; }
+        }
+        // Fallback: use first sentences of paragraphs
+        if ( count( $insights ) < 3 ) {
+            foreach ( $paragraphs as $p ) {
+                $first = preg_split( '/(?<=[.!?])\s+/', $p, 2 );
+                if ( ! empty( $first[0] ) ) { $insights[] = trim( $first[0] ); }
+                if ( count( $insights ) >= 3 ) { break; }
+            }
+        }
+        return array_slice( array_unique( $insights ), 0, 5 );
+
+    # -------------------------------------------------------------------------
+    # get_champion_answer
+    # -------------------------------------------------------------------------
+    get_champion_answer:
+      signature: "private function get_champion_answer( array $providers, string $champion_name ): string"
+      body_logic: |
+        foreach ( $providers as $p ) {
+            if ( isset( $p['provider'] ) && $p['provider'] === $champion_name
+                 && ! empty( $p['answer'] ) ) {
+                return (string) $p['answer'];
+            }
+        }
+        // Fallback: return first non-refusal answer
+        foreach ( $providers as $p ) {
+            if ( empty( $p['is_refusal'] ) && ! empty( $p['answer'] ) ) {
+                return (string) $p['answer'];
+            }
+        }
+        return '';
+
+    # -------------------------------------------------------------------------
+    # convert_plain_to_html_paragraphs
+    # -------------------------------------------------------------------------
+    convert_plain_to_html_paragraphs:
+      signature: "private function convert_plain_to_html_paragraphs( string $text ): string"
+      purpose: "Wrap double-newline-separated text in <p> tags. Light markdown: **bold** → <strong>."
+      body_logic: |
+        if ( empty( $text ) ) { return ''; }
+        // Bold markdown
+        $text = preg_replace( '/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text );
+        // Split on double newlines
+        $blocks = preg_split( '/\n{2,}/', $text );
+        $output = '';
+        foreach ( $blocks as $block ) {
+            $block = trim( $block );
+            if ( ! empty( $block ) ) {
+                $output .= '<p style="line-height:1.7;margin-bottom:16px;font-size:16px;color:#333;">'
+                        . nl2br( esc_html( $block ) ) . '</p>';
+            }
+        }
+        return $output;
+
+    # -------------------------------------------------------------------------
+    # generate_faq_schema
+    # -------------------------------------------------------------------------
+    generate_faq_schema:
+      signature: "private function generate_faq_schema( string $query, string $synthesis, string $focus_keyword ): array"
+      purpose: "Build FAQPage JSON-LD schema (increases AI citation likelihood)"
+      body_logic: |
+        // Take first 155 chars of synthesis as answer text (schema answer length)
+        $answer_text = strlen( $synthesis ) > 155 ? substr( $synthesis, 0, 152 ) . '...' : $synthesis;
+        return array(
+            '@context'   => 'https://schema.org',
+            '@type'      => 'FAQPage',
+            'mainEntity' => array(
+                array(
+                    '@type'          => 'Question',
+                    'name'           => sanitize_text_field( $query ),
+                    'acceptedAnswer' => array(
+                        '@type' => 'Answer',
+                        'text'  => sanitize_text_field( $answer_text ),
+                    ),
+                ),
+                array(
+                    '@type'          => 'Question',
+                    'name'           => 'What do AI models say about ' . sanitize_text_field( $focus_keyword ) . '?',
+                    'acceptedAnswer' => array(
+                        '@type' => 'Answer',
+                        'text'  => 'According to Seekrates AI consensus analysis, ' . sanitize_text_field( $answer_text ),
+                    ),
+                ),
+            ),
+        );
+
+    # -------------------------------------------------------------------------
+    # generate_article_schema
+    # -------------------------------------------------------------------------
+    generate_article_schema:
+      signature: "private function generate_article_schema( string $seo_title, string $meta_description ): array"
+      body_logic: |
+        return array(
+            '@context'    => 'https://schema.org',
+            '@type'       => 'Article',
+            'headline'    => sanitize_text_field( $seo_title ),
+            'description' => sanitize_text_field( $meta_description ),
+            'author'      => array( '@type' => 'Organization', 'name' => 'Seekrates AI' ),
+            'publisher'   => array(
+                '@type' => 'Organization',
+                'name'  => get_bloginfo( 'name' ),
+                'url'   => home_url(),
+            ),
+            'datePublished' => date( 'c' ),   // ISO 8601
+        );
+
+    # -------------------------------------------------------------------------
+    # build_content_html
+    # -------------------------------------------------------------------------
+    build_content_html:
+      signature: "private function build_content_html( array $vars ): string"
+      purpose: |
+        PHP equivalent of seekrates_blog_post_template.html v6.0.0.
+        Constructs full blog post HTML from $vars array.
+        Elementor shortcodes STRIPPED (customer sites — not seekrates-ai.com).
+        Internal links use home_url() not seekrates-ai.com.
+        All output properly escaped.
+      body_logic: |
+        Extract and escape all vars:
+          $fk  = esc_html( $vars['focus_keyword'] )
+          $q   = esc_html( $vars['query'] )
+          $pct = (int) $vars['consensus_pct']
+          $al  = esc_html( $vars['agreement_level'] )
+          // ... all vars escaped before use in HTML
+
+        HTML structure (matches template v6.0.0 minus Elementor shortcodes):
+          1. <article class="seekrates-consensus-post">
+          2. Intro paragraph with $fk in <strong>
+          3. Consensus badge (dark blue, shows $pct%)
+          4. "The Question Asked" block with $q
+          5. Metrics table: agent_count | avg_confidence | champion_score | agreement_level
+          6. H2 "What 5 Leading AI Models Say About {$fk}" (id="consensus")
+          7. Paragraphs loop (each in <p>)
+          8. Key Insights box (if $insights non-empty)
+          9. Champion response box (H2 id="champion", shows $champion_answer)
+          10. Points of Agreement (if non-empty)
+          11. Points of Divergence (if non-empty)
+          12. "Why {$fk} Matters" section (static copy + internal link via home_url())
+          13. Pull quote blockquote
+          14. "Next Steps" section
+          15. Champion info paragraph
+          16. Internal link: home_url('/category/ai-insights/')
+          17. Methodology footer (small text)
+          18. </article>
+        
+        Return: wp_kses_post( $html )  // Applied before return
+
+      note: |
+        DO NOT include Elementor shortcodes [elementor-template id="..."].
+        DO NOT include eggC() JavaScript.
+        DO NOT include seekrates-ai.com URLs — use home_url() or esc_url( home_url('/...') ).
+        Agreement level colour: HIGH=#d4edda MODERATE=#fff3cd LOW=#f8d7da (matches template exactly).
+
+    # -------------------------------------------------------------------------
+    # inject_consensus_meta — UPDATED field paths
+    # -------------------------------------------------------------------------
+    inject_consensus_meta:
+      signature: "private function inject_consensus_meta( int $post_id, array $api_data, string $mode ): void"
+      purpose: "Store consensus metadata for meta box — UPDATED for new field paths"
+      body_logic: |
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['score'],
+            (float) ( $api_data['consensus']['convergence_percentage'] ?? 0.0 ) );
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['mode'],
+            sanitize_text_field( $mode ) );
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['champion_provider'],
+            sanitize_text_field( $api_data['consensus']['champion'] ?? '' ) );
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['agreement_level'],
+            sanitize_text_field( $api_data['consensus']['consensus_confidence'] ?? '' ) );
+        // risk_analysis may be null (seeker/acolyte tiers) — graceful default
+        $risk_recommendation = $api_data['risk_analysis']['oracle_recommendation'] ?? '';
+        $risk_level = empty( $risk_recommendation ) ? '' :
+            ( str_contains( strtolower( $risk_recommendation ), 'caution' ) ? 'medium' : 'low' );
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['oracle_risk_level'],
+            sanitize_text_field( $risk_level ) );
+        update_post_meta( $post_id, self::CONSENSUS_META_KEYS['created_at'],
+            current_time( 'mysql' ) );
+      note: |
+        _consensuspress_score now reads from consensus.convergence_percentage (float 0-100).
+        _consensuspress_champion_provider now reads from consensus.champion (string).
+        _consensuspress_agreement_level now reads from consensus.consensus_confidence (HIGH|MODERATE|LOW).
+        Meta box reads same six keys — no change to meta box code.
+
+    # -------------------------------------------------------------------------
+    # create_draft — UPDATED orchestration (public signature unchanged)
+    # -------------------------------------------------------------------------
+    create_draft:
+      signature: "public function create_draft( array $api_data, string $mode = 'create' ): array"
+      purpose: "Master method — updated to call generate_content_pipeline() for content"
+      body_logic: |
+        1. if ( ! $this->validate_api_data( $api_data ) ) {
+               return array( 'success' => false, 'post_id' => 0,
+                             'edit_url' => '', 'message' => 'Invalid API response structure.' );
+           }
+        2. // Generate all content, metadata, schema from raw engine data
+           $generated = $this->generate_content_pipeline( $api_data );
+
+        3. // Build post title
+           $post_title = sanitize_text_field( $generated['metadata']['suggested_title'] );
+
+        4. // Build post args
+           $post_args = array(
+               'post_title'   => $post_title,
+               'post_content' => wp_kses_post( $generated['content_html'] ),
+               'post_status'  => 'draft',
+               'post_type'    => 'post',
+               'post_author'  => get_current_user_id(),
+           );
+
+        5. $post_id = wp_insert_post( $post_args, true );
+           if ( is_wp_error( $post_id ) ) {
+               return array( 'success' => false, 'post_id' => 0,
+                             'edit_url' => '', 'message' => $post_id->get_error_message() );
+           }
+
+        6. $this->inject_rank_math_meta( $post_id, $generated['metadata'], $generated['schema_markup'] );
+        7. $this->inject_consensus_meta( $post_id, $api_data, $mode );
+        8. // featured_image is empty array in Sprint 7 — sideload skipped gracefully
+           if ( ! empty( $generated['featured_image']['url'] ) ) {
+               $this->sideload_featured_image( $post_id, $generated['featured_image'] );
+           }
+        9. $this->assign_taxonomy_terms( $post_id, $generated['metadata'] );
+
+        10. return array(
+                'success'  => true,
+                'post_id'  => (int) $post_id,
+                'edit_url' => (string) get_edit_post_link( $post_id, 'raw' ),
+                'message'  => 'Draft created successfully.',
+            );
+
+# =============================================================================
+# D5: MOCK API v2.0.0 — FIELD NAME UPDATES
+# =============================================================================
+d5_mock_api_updates:
+
+  file: "consensuspress_mock_api.yaml"
+  version_bump: "1.0.0 → 2.0.0"
+
+  response_contract_changes:
+    description: "Replace old assumed fields with real engine field paths"
+    old_to_new:
+      - old: "consensus_reached (top-level bool)"
+        new: "data.consensus.reached"
+      - old: "consensus_score (top-level float)"
+        new: "data.consensus.convergence_percentage"
+      - old: "agreement_level (top-level string)"
+        new: "data.consensus.consensus_confidence"
+      - old: "champion.provider (top-level object)"
+        new: "data.consensus.champion (string)"
+      - old: "champion.response_text"
+        new: "derived: data.providers[where provider==champion].answer"
+      - old: "champion.score"
+        new: "data.consensus.champion_score"
+      - old: "synthesis (top-level string)"
+        new: "data.consensus.consensus_text"
+      - old: "oracle_risk (top-level object)"
+        new: "data.risk_analysis (null for seeker/acolyte, populated for oracle/sage)"
+      - old: "individual_responses[].response_text"
+        new: "data.providers[].answer"
+      - old: "individual_responses[].is_champion"
+        new: "derived: provider name matches data.consensus.champion"
+      - old: "metadata.suggested_title → metadata.focus_keyword → etc. (generated by server)"
+        new: "REMOVED — all generated by plugin PHP content pipeline"
+      - old: "content_html (provided by server)"
+        new: "REMOVED — generated by plugin build_content_html()"
+      - old: "schema_markup.faq + .article (provided by server)"
+        new: "REMOVED — generated by plugin generate_faq_schema() / generate_article_schema()"
+      - old: "featured_image.url (Unsplash URL from server)"
+        new: "REMOVED — deferred Sprint 8"
+      - old: "points_of_agreement / points_of_divergence (top-level arrays)"
+        new: "data.divergence.common_themes / data.divergence.outliers"
+
+  new_fixture_create_success: |
+    Envelope:
+      {"success": true, "data": { ...engine fields... }}
+
+    data structure:
+    {
+      "query": "What are the most effective AI search optimisation strategies for WordPress blogs in 2026?",
+      "mode": "create",
+      "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "tier": "acolyte",
+      "consensus": {
+        "champion": "openai",
+        "champion_score": 82,
+        "convergence_percentage": 87.5,
+        "consensus_confidence": "HIGH",
+        "reached": true,
+        "agreement_percentage": 87.5,
+        "consensus_text": "Five AI models reached 87.5% agreement that WordPress blogs must adopt three complementary optimisation strategies to survive the AI search transition. GEO (Generative Engine Optimisation) ensures content appears in AI-generated summaries. LLMO (Large Language Model Optimisation) structures content for extraction by language models. AEO (Answer Engine Optimisation) targets direct-answer placements in Perplexity, SGE, and ChatGPT search. All five providers agreed that structured data (FAQ + Article schema) is the single highest-impact technical implementation.",
+        "consensus_panel": "<p>HTML synthesis panel — not used for blog content</p>",
+        "divergence_highlight": "",
+        "dissenting_provider": ""
+      },
+      "providers": [
+        {
+          "provider": "openai",
+          "answer": "AI search optimisation for WordPress requires a multi-layered approach combining Generative Engine Optimisation (GEO), Large Language Model Optimisation (LLMO), and Answer Engine Optimisation (AEO). The most effective strategies include structuring content with question-format H2 headings that match how users query AI assistants, maintaining paragraph lengths of 40-60 words for optimal LLM extraction, implementing FAQ schema markup which increases AI citation likelihood, and ensuring cross-model validation of all published claims to prevent hallucination propagation.",
+          "score": 82,
+          "confidence": 0.88,
+          "is_refusal": false,
+          "status": "success"
+        },
+        {
+          "provider": "claude",
+          "answer": "WordPress content strategy for AI search survival requires three pillars: structured data implementation (FAQ + Article schema), semantic content architecture (question-based H2s matching AI query patterns), and consensus-validated claims. Single-model content risks hallucination propagation; multi-model validation ensures factual reliability. The shift from keyword density to answer density is the defining transition for WordPress publishers in 2026.",
+          "score": 78,
+          "confidence": 0.85,
+          "is_refusal": false,
+          "status": "success"
+        },
+        {
+          "provider": "gemini",
+          "answer": "AI search engines extract content differently from traditional crawlers. For WordPress blogs, the priority stack is: (1) FAQ schema for direct-answer placement, (2) 40-60 word paragraph structure for LLM chunk extraction, (3) authoritative outbound links for context credibility, (4) regular content freshness signals. GEO and LLMO represent the same underlying principle expressed differently — optimise for extraction, not just discovery.",
+          "score": 75,
+          "confidence": 0.82,
+          "is_refusal": false,
+          "status": "success"
+        },
+        {
+          "provider": "mistral",
+          "answer": "The most effective WordPress AI search strategy combines technical schema implementation with content architecture reforms. Priority actions: implement FAQPage schema on all posts, restructure headers as direct questions, reduce paragraph length to 40-60 words, and validate claims across multiple AI sources before publishing. The consensus methodology itself is an SEO signal — it demonstrates cross-validated accuracy.",
+          "score": 71,
+          "confidence": 0.79,
+          "is_refusal": false,
+          "status": "success"
+        },
+        {
+          "provider": "cohere",
+          "answer": "WordPress blogs face a fundamental architecture challenge: traditional long-form content optimised for Google crawling does not extract well into AI summaries. The solution requires paragraph chunking (40-60 words), question-format headings, and JSON-LD schema. Content freshness and external reference authority remain important but secondary to extraction architecture.",
+          "score": 68,
+          "confidence": 0.75,
+          "is_refusal": false,
+          "status": "success"
+        }
+      ],
+      "divergence": {
+        "common_themes": [
+          "FAQ schema implementation increases AI citation likelihood",
+          "40-60 word paragraph structure optimises LLM extraction",
+          "Question-format H2 headings match AI query patterns",
+          "Multi-model validation reduces hallucination risk"
+        ],
+        "outliers": [
+          "Cohere emphasises extraction architecture over authority signals",
+          "Mistral uniquely cites consensus methodology itself as an SEO signal"
+        ],
+        "personality_quotes": {},
+        "article_hook": "Five AI models reached 87.5% agreement on WordPress AI search strategy.",
+        "theme_coverage": {}
+      },
+      "risk_analysis": null
+    }
+
+  tests_to_update:
+    - file: "tests/test-post-builder.php"
+      changes: |
+        Update fixture loading to use new field paths.
+        test_draft_creation_with_full_metadata:
+          $data['consensus']['convergence_percentage'] replaces $data['consensus_score']
+          $data['consensus']['champion'] replaces $data['champion']['provider']
+          $data['consensus']['consensus_confidence'] replaces $data['agreement_level']
+        test_validate_api_data:
+          Update $valid_data to use new shape
+          Update $invalid_data missing key tests to use 'consensus' key
+        test_rank_math_injection:
+          Verify focus_keyword generated from query (not $data['metadata']['focus_keyword'])
+          Verify meta_description generated from synthesis (not $data['metadata']['meta_description'])
+        test_content_html_not_empty:
+          Verify content_html built from champion answer (providers[0].answer)
+    - file: "tests/test-api-client.php"
+      changes: |
+        Add test_tc_gate_handled:
+          Mock HTTP 200 with body {"status":"needs_tc_acceptance","tc_url":"https://..."}
+          Assert: $result['success'] === false
+          Assert: $result['error']['code'] === 'needs_tc_acceptance'
+          Assert: $result['error']['tc_url'] is a valid URL
+
+# =============================================================================
+# D6: FILE MANIFEST WITH DNA HEADERS
+# =============================================================================
+d6_manifest:
+
+  new_files:
+
+    - path: "src/api/consensuspress_endpoints.py"
+      dna:
+        file: "src/api/consensuspress_endpoints.py"
+        version: "1.0.0"
+        purpose: "ConsensusPress WordPress plugin API endpoint — JSON response, auth via user_manager"
+        author: "C-C (Session 08, Sprint 7)"
+        spec: "sprint_7_d1_d7_instructions.yaml D4 part_a_railway consensuspress_endpoint"
+        gps: "fr_04_uc_13_ec_01_tc_001"
+        dependencies: |
+          consensus_engine.generate_expert_panel_response_v4
+          auth.user_manager.UserManager
+          api.auth_endpoints.check_tc_acceptance, get_user_tier_by_email,
+            check_tier_limits, get_queries_today
+        reusable: "No — plugin-specific endpoint"
+        inputs:
+          - "I1: POST body ConsensusPressRequest (query, mode, context)"
+          - "I2: Authorization header Bearer token"
+        outputs:
+          - "O1: JSON {success: true, data: ConsensusResult.model_dump() + query/mode}"
+          - "O2: JSON {status: needs_tc_acceptance} HTTP 200 on T&C gate"
+          - "O3: HTTPException 401/402/500 on errors"
+
+  modified_files:
+
+    - path: "src/server/main.py"
+      version_bump: "existing → +0.0.1"
+      change: "ADD router include for consensuspress_router"
+      lines_changed: 2
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-api.php"
+      dna_update:
+        version: "1.0.0 → 1.1.0"
+        author_add: "Modified: C-C (Session 08, Sprint 7)"
+        spec_add: "sprint_7_d1_d7_instructions.yaml D4 part_a api_php_patch"
+      change: "ADD T&C gate handler in query() — 10 lines"
+
+    - path: "plugin/consensuspress/includes/class-consensuspress-post-builder.php"
+      dna_update:
+        version: "1.0.0 → 2.0.0"
+        author_add: "Modified: C-C (Session 08, Sprint 7)"
+        spec_add: "sprint_7_d1_d7_instructions.yaml D4 part_b_post_builder"
+        purpose_update: |
+          Creates WordPress draft from Seekrates API consensus response.
+          v2.0.0: Accepts real ConsensusResult field structure.
+          Generates content_html, SEO metadata, and JSON-LD schema in PHP
+          (replaces seekrates_publisher content_formatter.py + seo_optimizer.py).
+      change: "New private content pipeline methods + updated field path reads"
+
+    - path: "consensuspress_mock_api.yaml"
+      version_bump: "1.0.0 → 2.0.0"
+      change: "Updated response contract + fixtures to match real engine fields"
+
+# =============================================================================
+# D7: VERIFICATION CHECKLIST
+# =============================================================================
+d7_verification:
+
+  # ---------------------------------------------------------------------------
+  # Part A: Railway endpoint verification
+  # ---------------------------------------------------------------------------
+  railway_gates:
+    - gate: "Endpoint route registered"
+      check: "curl -X POST https://app.seekrates-ai.com/api/v1/consensus with valid Bearer"
+      expected: "HTTP 200 with {success: true, data: {...}}"
+
+    - gate: "Auth gate"
+      check: "POST /api/v1/consensus without Authorization header"
+      expected: "HTTP 401"
+
+    - gate: "T&C gate"
+      check: "POST with valid token, user has not accepted T&C"
+      expected: "HTTP 200 {status: needs_tc_acceptance}"
+
+    - gate: "Quota gate"
+      check: "POST with valid token, tier limit exceeded"
+      expected: "HTTP 402"
+
+    - gate: "query field present in data"
+      check: "Response body data.query === request.query"
+      expected: "String matches"
+
+    - gate: "mode field present in data"
+      check: "Response body data.mode === 'create'"
+      expected: "String matches"
+
+    - gate: "consensus.convergence_percentage present"
+      check: "response.data.consensus.convergence_percentage is float"
+      expected: "0.0 - 100.0"
+
+    - gate: "providers array present"
+      check: "response.data.providers is array, len >= 2"
+      expected: "Non-empty array"
+
+    - gate: "Existing routes unaffected"
+      check: "POST /api/v1/consensus-guest still works"
+      expected: "Existing behaviour unchanged"
+
+  # ---------------------------------------------------------------------------
+  # Part B: Plugin verification
+  # ---------------------------------------------------------------------------
+  php_scanner_gates:
+    - gate: "hal001_php_scanner"
+      command: "php hal001_php_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+    - gate: "wp_compliance_scanner"
+      command: "php wp_compliance_scanner.php plugin/consensuspress/"
+      expected: "EXIT 0 — 0 violations"
+
+  test_gates:
+    - gate: "All Sprint 1-5 tests still pass"
+      command: "Run full test suite"
+      expected: "All existing tests pass — zero regressions"
+
+    - gate: "test-post-builder.php updated tests pass"
+      expected: "All assertions updated for new field paths pass"
+
+    - gate: "test-api-client.php new T&C gate test passes"
+      expected: "needs_tc_acceptance handled correctly"
+
+  manual_checklist:
+    - "class-consensuspress-post-builder.php v2.0.0: DNA header updated"
+    - "create_draft() public signature UNCHANGED"
+    - "validate_api_data() checks new keys (consensus, providers, correlation_id)"
+    - "inject_consensus_meta() reads consensus.convergence_percentage not consensus_score"
+    - "inject_consensus_meta() reads consensus.champion not champion.provider"
+    - "inject_consensus_meta() reads consensus.consensus_confidence not agreement_level"
+    - "build_content_html() contains NO Elementor shortcodes"
+    - "build_content_html() uses home_url() not seekrates-ai.com for internal links"
+    - "All $vars in build_content_html() properly escaped (esc_html / esc_url)"
+    - "content_html passed through wp_kses_post() before wp_insert_post"
+    - "generate_content_pipeline() does NOT make LLM calls or HTTP requests"
+    - "focus_keyword extracted from $api_data['query'] (not from API response)"
+    - "sideload_featured_image() preserved unchanged"
+    - "sideload_featured_image() is NOT called when featured_image array is empty"
+    - "consensuspress_mock_api.yaml v2.0.0: old content_html field REMOVED"
+    - "consensuspress_mock_api.yaml v2.0.0: old metadata.focus_keyword REMOVED"
+    - "consensuspress_mock_api.yaml v2.0.0: new fixture has data.consensus.* field paths"
+    - "class-consensuspress-api.php T&C patch: tc_url escaped with esc_url_raw()"
+    - "Railway main.py: only 2 lines added, no other changes"
+    - "No hardcoded secrets in consensuspress_endpoints.py"
+    - "Railway endpoint imports ONLY from existing auth_endpoints.py import block"
+
+  content_quality_check:
+    description: "Manual spot-check on generated content from fixture"
+    steps:
+      - "Load fixture_create_success JSON"
+      - "Instantiate ConsensusPress_Post_Builder"
+      - "Call create_draft( $fixture_data, 'create' )"
+      - "Inspect generated content_html: should contain consensus badge, metrics table, champion box"
+      - "Inspect focus_keyword: should be 2-3 words from query (not stop words)"
+      - "Inspect meta_description: should be <= 155 chars, contain focus_keyword"
+      - "Inspect seo_title: should contain focus_keyword, <= 60 chars"
+      - "Inspect faq_schema: valid JSON-LD with @context and mainEntity"
+      - "Inspect article_schema: valid JSON-LD with @type Article"
+      - "Inspect paragraphs: should be 3-7 chunks, each ~40-60 words"
+      - "Verify NO Elementor shortcodes in content_html"
+      - "Verify NO seekrates-ai.com URLs in content_html"
+
+# =============================================================================
+# SPRINT 7 EXECUTION ORDER
+# =============================================================================
+execution_order:
+
+  phase_1_railway:
+    description: "Part A — Railway endpoint (Python)"
+    files:
+      - "src/api/consensuspress_endpoints.py (NEW)"
+      - "src/server/main.py (2 lines)"
+    duration_estimate: "30-45 minutes"
+    blocker_cleared: "B-01-01 (server endpoint)"
+
+  phase_2_api_patch:
+    description: "T&C gate patch (PHP)"
+    files:
+      - "includes/class-consensuspress-api.php (10 lines)"
+    duration_estimate: "15 minutes"
+    note: "Small patch — do in same session as Phase 1"
+
+  phase_3_post_builder:
+    description: "Part B — Post-builder content pipeline (PHP)"
+    files:
+      - "includes/class-consensuspress-post-builder.php (v2.0.0)"
+    duration_estimate: "60-90 minutes"
+    note: "Largest deliverable. All new private methods + updated field paths."
+
+  phase_4_mock_and_tests:
+    description: "Mock API update + test updates"
+    files:
+      - "consensuspress_mock_api.yaml (v2.0.0)"
+      - "tests/test-post-builder.php (updated assertions)"
+      - "tests/test-api-client.php (new T&C test)"
+    duration_estimate: "30 minutes"
+
+  total_estimated_loc:
+    consensuspress_endpoints_py: "~55 lines"
+    main_py_addition: "2 lines"
+    api_php_patch: "~12 lines"
+    post_builder_php: "~350 lines (all new private methods + updated methods)"
+    mock_api_update: "~100 lines YAML"
+    test_updates: "~40 lines"
+
+# =============================================================================
+# DECISIONS RECORDED
+# =============================================================================
+decisions:
+  D-08-03: "Synchronous JSON (Option A) over webhook callback — matches existing async architecture"
+  D-08-04: "Auth via user_manager.validate_session() — no new key infrastructure"
+  D-08-05: "T&C gate handled in plugin — seekrates_ai codebase unchanged"
+  D-08-06: "All content production (HTML/SEO/schema) in PHP plugin, not server"
+  D-08-07: "Unsplash fetch deferred to Sprint 8 — featured_image = empty array Sprint 7"
+  D-08-08: "query field injected into response data by endpoint — not in ConsensusResult Pydantic model"
+  D-08-09: "points_of_agreement/divergence mapped from divergence.common_themes/outliers"
+
+# =============================================================================
+# BLOCKERS CLEARED
+# =============================================================================
+blockers_cleared:
+  B-01-01:
+    description: "POST /api/v1/consensus endpoint does not exist on Railway"
+    cleared_by: "Sprint 7 Phase 1 — consensuspress_endpoints.py"
+
+blockers_remaining:
+  B-08-01:
+    description: "Unsplash featured image — deferred Sprint 8"
+    impact: "Posts created without featured image. User sets manually."
+    priority: "Low — cosmetic only"
+
+# =============================================================================
+# END OF SPRINT 7 D1-D7 SPECIFICATION
+# =============================================================================

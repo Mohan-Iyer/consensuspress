@@ -1,0 +1,441 @@
+# =============================================================================
+# C-C INSTRUCTION: CCI-117-01
+# =============================================================================
+# file:             ccis/CCI-117-01_iqi_self_challenge.yaml
+# instruction_id:   CCI-117-01
+# created:          2026-03-06
+# session:          119
+# template_version: "2.0.0"
+# status:           SPEC_LINT_PASSED
+# =============================================================================
+
+# =============================================================================
+# C-C STOP RULES (READ FIRST — NON-NEGOTIABLE)
+# =============================================================================
+# STOP-1: Dict boundary not named in D1? STOP. Report to D-C.
+# STOP-2: Function in D0 absent from output? STOP. Confirm with D-C.
+# STOP-3: LLM-calling function lacks D3 format contract? STOP.
+# STOP-4: Anything in D1-D7 ambiguous? STOP and escalate.
+# STOP-5: Delivering without preservation_manifest.yaml? STOP.
+# =============================================================================
+
+instruction_header:
+  instruction_id: "CCI-117-01"
+  created: "2026-03-06"
+  session: 119
+  template_version: "2.0.0"
+  status: "SPEC_LINT_PASSED"
+
+  target:
+    script_path: "tools/spec_lint.py"
+    script_name: "spec_lint"
+    gps_coordinate: "fr_00_uc_03_ec_01_tc_001"
+
+  test_target:
+    test_file_path: "tools/tests/test_spec_lint_iqi.py"
+    d4_scenarios_covered: ["HP-001", "HP-002", "HP-003", "EH-001", "EH-002", "EH-003"]
+
+  task_type: "modify_existing"
+  priority: "P1"
+
+# =============================================================================
+# CONTEXT
+# =============================================================================
+context: |
+  spec_lint.py v1.0.0 validates CCI structure but does not enforce the IQI
+  self-challenge block. The IQI self-challenge is a mandatory D-C quality gate:
+  before any CCI is issued to C-C, D-C must answer three questions that prevent
+  the most common LLM failure modes (self-certification circularity, ungrounded
+  assertions, silent omissions).
+
+  v1.0.2 adds:
+    1. check_iqi() — new check function, enforces iqi_self_challenge block
+    2. main() — wired to call check_iqi()
+    3. version string — bumped to 1.0.2 in DNA header and print statement
+
+  The iqi_self_challenge block structure in a CCI:
+
+    iqi_self_challenge:
+      circularity:
+        question: "Is D-C certifying its own work without independent verification?"
+        answer: "[D-C fills this in — non-empty, non-placeholder]"
+      evidence:
+        question: "Does every D0/D1/D2/D3 claim have machine-verifiable backing?"
+        answer: "[D-C fills this in — non-empty, non-placeholder]"
+      omission:
+        question: "What has been left out that could cause C-C to fail or gap-fill?"
+        answer: "[D-C fills this in — non-empty, non-placeholder]"
+
+  spec_lint FAILS (exit 1) if:
+    - iqi_self_challenge block is absent entirely
+    - Any of the three questions is missing
+    - Any answer is empty, None, or still a placeholder
+
+  spec_lint WARNS (but does not fail) if:
+    - An answer is very short (< 10 chars) — may be a stub
+
+# =============================================================================
+# IQI SELF-CHALLENGE (mandatory on this CCI itself)
+# =============================================================================
+iqi_self_challenge:
+  circularity:
+    question: "Is D-C certifying its own work without independent verification?"
+    answer: >
+      spec_lint is a tool, not a verdict. It runs deterministic checks on YAML
+      structure. The IQI block is enforced mechanically — C-C cannot skip it
+      and spec_lint cannot pass a CCI without it. The check itself is not
+      self-certifying: it either finds the block or it does not.
+  evidence:
+    question: "Does every D0/D1/D2/D3 claim have machine-verifiable backing?"
+    answer: >
+      D0 is machine-generated from H-SEEK-03 inventory_file.py output
+      (SHA256: 3ceccd446230b5c9f2c70b31c1e38e0fc3914e6f4b3e096bc1a0ee1c55d64756).
+      17 functions confirmed. D1 has zero new types — check_iqi uses only
+      LintResult (existing) and dict/str primitives. D2 flows are verified:
+      check_iqi() reads cci dict and writes to result — same pattern as all
+      other check_* functions. D3 not applicable — no LLM calls.
+  omission:
+    question: "What has been left out that could cause C-C to fail or gap-fill?"
+    answer: >
+      One deliberate scope boundary: spec_lint does NOT check the content
+      quality of IQI answers — only that they exist and are non-empty. Semantic
+      quality assessment is a D-C/human responsibility. C-C cannot gap-fill here
+      because the check is purely structural (key present + value non-empty).
+      No ambiguity introduced.
+
+# =============================================================================
+# D0: PRESERVATION CONTRACT
+# =============================================================================
+d0_preservation_contract:
+  source_file: "tools/spec_lint.py"
+  inventory_generated_by: "tools/inventory_file.py"
+  inventory_date: "2026-03-06"
+  inventory_sha256: "3ceccd446230b5c9f2c70b31c1e38e0fc3914e6f4b3e096bc1a0ee1c55d64756"
+  function_count: 17
+
+  functions:
+    - name: "__init__"
+      line: 44
+      kind: "method"
+      class_name: "LintResult"
+      signature_hash: "e6052ca6"
+      must_preserve: true
+    - name: "fail"
+      line: 49
+      kind: "method"
+      class_name: "LintResult"
+      signature_hash: "2f40d196"
+      must_preserve: true
+    - name: "warn"
+      line: 52
+      kind: "method"
+      class_name: "LintResult"
+      signature_hash: "db88ed0f"
+      must_preserve: true
+    - name: "ok"
+      line: 55
+      kind: "method"
+      class_name: "LintResult"
+      signature_hash: "649196e3"
+      must_preserve: true
+    - name: "passed"
+      line: 59
+      kind: "method"
+      class_name: "LintResult"
+      signature_hash: "b2f23754"
+      must_preserve: true
+    - name: "load_cci"
+      line: 67
+      kind: "function"
+      signature_hash: "280e4c5d"
+      must_preserve: true
+    - name: "check_identity"
+      line: 94
+      kind: "function"
+      signature_hash: "5c4dfbeb"
+      must_preserve: true
+    - name: "_get"
+      line: 104
+      kind: "function"
+      signature_hash: "262c5332"
+      must_preserve: true
+    - name: "check_d0"
+      line: 155
+      kind: "function"
+      signature_hash: "92dbfcf4"
+      must_preserve: true
+    - name: "_validate_deferred_block"
+      line: 204
+      kind: "function"
+      signature_hash: "60395fc8"
+      must_preserve: true
+    - name: "check_d1"
+      line: 251
+      kind: "function"
+      signature_hash: "f34dee54"
+      must_preserve: true
+    - name: "check_d2"
+      line: 293
+      kind: "function"
+      signature_hash: "594304b1"
+      must_preserve: true
+    - name: "check_d3"
+      line: 334
+      kind: "function"
+      signature_hash: "76a6bbe1"
+      must_preserve: true
+    - name: "check_d4"
+      line: 372
+      kind: "function"
+      signature_hash: "f941c469"
+      must_preserve: true
+    - name: "check_d5"
+      line: 398
+      kind: "function"
+      signature_hash: "24b1b8dc"
+      must_preserve: true
+    - name: "check_d6"
+      line: 416
+      kind: "function"
+      signature_hash: "96bdc15f"
+      must_preserve: true
+    - name: "main"
+      line: 439
+      kind: "function"
+      signature_hash: "ea1a0f91"
+      must_preserve: true
+
+  removal_approvals: []
+
+  new_functions:
+    - name: "check_iqi"
+      kind: "function"
+      signature: "def check_iqi(cci: dict[str, Any], result: LintResult) -> None"
+      purpose: "Enforce iqi_self_challenge block — fail if absent or any answer empty"
+      placement: "After check_d6, before main"
+
+# =============================================================================
+# D1: TYPE CONTRACTS (ILL-1 GUARDRAIL)
+# =============================================================================
+d1_type_contracts:
+  vocabulary_constraint: |
+    C-C MUST use ONLY types defined here or already present in spec_lint.py.
+    No new TypedDicts. check_iqi uses existing LintResult and dict primitives.
+
+  new_types: []  # No new TypedDicts — check_iqi uses dict[str, Any] navigation only.
+                 # This is the one permitted use of Any: navigating unknown YAML structure
+                 # that was loaded by yaml.safe_load. The boundary is the YAML loader,
+                 # not a D-C design decision.
+
+  existing_types_used:
+    - "LintResult — result accumulator (already in file)"
+    - "dict[str, Any] — YAML structure navigation (already in file, same pattern as all check_* functions)"
+
+  deferred: []
+
+# =============================================================================
+# D2: DOUBLE-ENTRY CONTRACTS (ILL-2 GUARDRAIL)
+# =============================================================================
+d2_double_entry_contracts:
+  balance_check: "BALANCED"
+
+  flows:
+    - id: "FLOW-01"
+      description: "IQI block navigation"
+      producer: "load_cci() — returns dict[str, Any]"
+      output: "cci dict passed to check_iqi()"
+      consumer: "check_iqi(cci, result)"
+      input: "cci dict — reads iqi_self_challenge key"
+
+    - id: "FLOW-02"
+      description: "IQI result accumulation"
+      producer: "check_iqi() — calls result.fail() / result.warn() / result.ok()"
+      output: "LintResult with IQI pass/fail/warn entries"
+      consumer: "main() — prints result and exits"
+      input: "LintResult.failures / .warnings / .passes"
+
+# =============================================================================
+# D3: FORMAT CONTRACTS
+# =============================================================================
+d3_format_contracts:
+  llm_functions_present: false
+  note: "spec_lint.py makes no LLM calls. check_iqi reads YAML structure only."
+
+# =============================================================================
+# D4: TEST SCENARIOS
+# =============================================================================
+d4_test_scenarios:
+  module: "spec_lint"
+
+  scenarios:
+
+    - id: "HP-001"
+      description: "check_iqi passes when all three answers present and non-empty"
+      preconditions: "none"
+      input: |
+        cci with iqi_self_challenge block:
+          circularity.answer: "Checked by spec_lint mechanically — not self-certified"
+          evidence.answer: "D0 machine-generated from inventory_file.py"
+          omission.answer: "No omissions — all boundaries explicit"
+      expected: "result.failures unchanged (no new failures), result.ok called with IQI message"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_passes_all_answers_present"
+
+    - id: "HP-002"
+      description: "check_iqi warns when an answer is very short (< 10 chars) but not empty"
+      preconditions: "none"
+      input: |
+        cci with iqi_self_challenge.circularity.answer: "Yes"
+        (other answers normal length)
+      expected: "result.warn called for circularity — no failure"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_warns_on_short_answer"
+
+    - id: "HP-003"
+      description: "check_iqi passes when iqi_self_challenge block has all three keys"
+      preconditions: "none"
+      input: "CCI with complete iqi_self_challenge block, all answers >= 10 chars"
+      expected: "result.ok called, zero failures added"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_complete_block_no_failures"
+
+    - id: "EH-001"
+      description: "check_iqi fails when iqi_self_challenge block is absent entirely"
+      preconditions: "none"
+      input: "cci dict with no iqi_self_challenge key"
+      expected: "result.fail called with IQI message"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_fails_block_absent"
+
+    - id: "EH-002"
+      description: "check_iqi fails when a required question key is missing"
+      preconditions: "none"
+      input: "iqi_self_challenge with circularity and evidence present but omission absent"
+      expected: "result.fail called for missing omission key"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_fails_missing_question_key"
+
+    - id: "EH-003"
+      description: "check_iqi fails when an answer is empty string"
+      preconditions: "none"
+      input: "iqi_self_challenge.evidence.answer: '' (empty string)"
+      expected: "result.fail called for empty answer"
+      pytest: "tools/tests/test_spec_lint_iqi.py::test_check_iqi_fails_empty_answer"
+
+# =============================================================================
+# D5: DIRECTORY MAP
+# =============================================================================
+d5_directory_map:
+  project_root: "seekrates_production/"
+  target_file: "tools/spec_lint.py"
+  test_file: "tools/tests/test_spec_lint_iqi.py"
+
+  source_files:
+    spec_lint: "tools/spec_lint.py"
+
+  test_files:
+    spec_lint_iqi: "tools/tests/test_spec_lint_iqi.py"
+
+  output_directories:
+    tools: "tools/"
+    tests: "tools/tests/"
+
+# =============================================================================
+# D6: IMPORT SPECIFICATION
+# =============================================================================
+d6_import_specification:
+
+  production_file_imports:
+    note: "No new imports required. check_iqi uses only existing imports already in spec_lint.py"
+    existing_imports_sufficient:
+      - "import sys   (already present)"
+      - "import yaml  (already present)"
+      - "import re    (already present)"
+      - "from pathlib import Path  (already present)"
+      - "from typing import Any   (already present)"
+
+  test_file_imports:
+    - line: 1
+      statement: "from __future__ import annotations"
+    - line: 3
+      statement: "import pytest"
+    - line: 5
+      statement: "import sys"
+    - line: 6
+      statement: "from pathlib import Path"
+    - line: 8
+      statement: "from tools.spec_lint import check_iqi, LintResult"
+
+# =============================================================================
+# D7: TEST INFRASTRUCTURE
+# =============================================================================
+d7_test_infrastructure:
+  conftest_required: false
+  fixtures: []
+  monkeypatch_targets: []
+  note: |
+    All tests construct cci dicts directly in Python — no file I/O required.
+    check_iqi takes a plain dict — testable without loading any YAML file.
+    test file location: tools/tests/test_spec_lint_iqi.py (alongside test_diff_inventories.py)
+
+# =============================================================================
+# PRECISE CHANGE SPECIFICATION
+# =============================================================================
+change_spec:
+
+  change_1:
+    what: "Add check_iqi() function"
+    where: "After check_d6() function, before main() — approximately line 433"
+    signature: "def check_iqi(cci: dict[str, Any], result: LintResult) -> None"
+    logic: |
+      iqi = cci.get("iqi_self_challenge")
+
+      if iqi is None:
+          result.fail("IQI", "iqi_self_challenge block is missing — D-C must complete before issuing to C-C")
+          return
+
+      REQUIRED_QUESTIONS = ["circularity", "evidence", "omission"]
+      SHORT_ANSWER_THRESHOLD = 10
+
+      all_ok = True
+      for q in REQUIRED_QUESTIONS:
+          block = iqi.get(q)
+          if block is None:
+              result.fail("IQI", f"iqi_self_challenge.{q} key is missing")
+              all_ok = False
+              continue
+          answer = block.get("answer") if isinstance(block, dict) else None
+          if not answer:
+              result.fail("IQI", f"iqi_self_challenge.{q}.answer is empty or missing")
+              all_ok = False
+          elif len(str(answer).strip()) < SHORT_ANSWER_THRESHOLD:
+              result.warn("IQI", f"iqi_self_challenge.{q}.answer is very short — confirm not a stub")
+          else:
+              result.ok(f"IQI {q}: answered ({len(str(answer).strip())} chars)")
+
+  change_2:
+    what: "Wire check_iqi into main()"
+    where: "In main(), after check_d6(cci, result) call, before result printing"
+    insertion: "    check_iqi(cci, result)"
+
+  change_3:
+    what: "Version bump in DNA header"
+    where: "Line 9 of DNA header (# version: 1.0.0)"
+    old: "# version:       1.0.0"
+    new: "# version:       1.0.2"
+
+  change_4:
+    what: "Version bump in print statement in main()"
+    where: "main() — the print line showing spec_lint version"
+    old: "print(f\"spec_lint.py v1.0.0 — CCI Specification Validator\")"
+    new: "print(f\"spec_lint.py v1.0.2 — CCI Specification Validator\")"
+
+# =============================================================================
+# C-C MANDATORY GATES BEFORE DELIVERY
+# =============================================================================
+cc_gates:
+  - "pytest tools/tests/test_spec_lint_iqi.py -v → 6/6 green"
+  - "python tools/spec_lint.py ccis/CCI-117-01_iqi_self_challenge.yaml → exit 0 (self-validates)"
+  - "python tools/diff_inventories.py --cci ccis/CCI-117-01_iqi_self_challenge.yaml --output tools/spec_lint.py → exit 0"
+  - "grep -n 'Dict\\[str, Any\\]' tools/spec_lint.py — only pre-existing uses, no new ones"
+  - "DNA header version shows 1.0.2"
+  - "preservation_manifest_CCI-117-01.yaml present"
+
+# note: diff_inventories D0 has 17 functions. Delivered spec_lint.py will have 18
+# (check_iqi added). diff_inventories checks D0 must_preserve=true functions are PRESENT
+# in output — 17/17 preserved + 1 new = exit 0. This is correct behaviour.

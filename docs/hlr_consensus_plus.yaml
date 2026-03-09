@@ -1,0 +1,613 @@
+# =============================================================================
+# HIGH-LEVEL REQUIREMENT (HLR): ConsensusPress by Seekrates
+# =============================================================================
+# document_name: "hlr_consensus_plus.yaml"
+# version: "1.2.0"
+# created: "2026-02-25"
+# revised: "2026-03-03 (Session 08 — v1.5.0 delivery verification)"
+# author: "D-C (Session 110 initial, Session 01 revision, Session 08 update)"
+# status: "PLUGIN COMPLETE v1.5.0 — Server-side endpoint PENDING"
+# origin_project: "ship_seekrates (Session 110)"
+# target_project: "Agent Foundry >> ConsensusPress by Seekrates"
+# methodology: "AFD (Axiom-First Development) + Seekrates Test Regime"
+# =============================================================================
+
+# =============================================================================
+# DELIVERY STATUS (v1.2.0 UPDATE)
+# =============================================================================
+delivery_status:
+  plugin_version: "1.5.0"
+  date_delivered: "2026-03-02"
+  sprints_complete: "6 of 6"
+  tests_passing: "41/41"
+  test_assertions: 69
+  regressions: 0
+  php_syntax_errors: 0
+
+  blocker_outstanding:
+    id: "B-01-01"
+    description: "POST /api/v1/consensus endpoint on Railway Seekrates server NOT YET BUILT"
+    impact: "Plugin is complete but cannot make live API calls until server endpoint exists"
+    resolution: "Build thin wrapper around consensus_engine.py — JSON in/JSON out"
+    owner: "Mohan (server-side)"
+
+  next_actions:
+    - "Build Railway API endpoint (B-01-01)"
+    - "Install plugin on WordPress 6.7 test site"
+    - "Smoke test Create + Rescue with real API key"
+    - "Create WordPress.org banner/icon assets (specs in plugin/consensuspress/assets/README.txt)"
+    - "Submit to WordPress.org SVN"
+
+# =============================================================================
+# EXECUTIVE SUMMARY
+# =============================================================================
+executive_summary:
+  product_name: "ConsensusPress"
+  tagline: "AI-Search Resilient Content Infrastructure for WordPress"
+
+  what_it_is: |
+    A WordPress plugin that connects to the Seekrates AI consensus engine
+    (hosted on Railway at app.seekrates-ai.com) to generate and rescue
+    blog content validated by five independent LLM providers (OpenAI,
+    Claude, Gemini, Mistral, Cohere). The plugin is a thin API client —
+    all intelligence stays on the Seekrates server. The plugin handles
+    WordPress-native delivery: auto-import as draft, featured image
+    sideload, Rank Math metadata injection, schema markup insertion,
+    and Rescue diff comparison.
+
+  what_it_is_NOT: |
+    - NOT an AI writer (positioning is "search survival infrastructure")
+    - NOT a local LLM integration (engine stays on Railway)
+    - NOT a text editor with an AI button
+    - NOT competing with Jasper/Copy.ai on speed or volume
+    - It IS an automation pipeline inside WordPress
+
+  strategic_purpose:
+    - "Revenue: WordPress.org (810M sites) + WarriorPlus + affiliate markets"
+    - "Proof: Portfolio piece for freelance AI dev markets (Codeable, Upwork, Toptal)"
+    - "Flywheel: Every plugin install = Seekrates AI customer by proxy"
+    - "AFD validation: Proves methodology works for WordPress plugin product type"
+    - "First vertical wrapper sold as standalone product"
+
+  proven_corpus: |
+    164 published posts, 81+ Rank Math average, indexed and ranking.
+    This is not a beta — the methodology has been validated at scale
+    across seekrates-ai.com, aihorizon.net, and pixels.net.nz.
+
+# =============================================================================
+# POSITIONING (from Gemini + ChatGPT competitive analysis)
+# =============================================================================
+positioning:
+
+  category: "AI-Search Resilient Content Infrastructure"
+  NOT_category: "AI content writer"
+
+  competitive_wedge:
+    - "Cross-model validation (5 independent LLMs)"
+    - "Hallucination filtering (12 refusal patterns, quality scoring)"
+    - "Risk flagging (Oracle Risk Analysis on model disagreement)"
+    - "AI-search optimisation (GEO + LLMO + AEO) built into every post"
+    - "Rescue of traffic lost to AI search (unique — no competitor offers this)"
+
+  differentiator_vs_competitors: |
+    Jasper, Copy.ai, Writesonic, Surfer SEO, Frase, MarketMuse, Koala.sh,
+    Byword.ai, SEO.ai — ALL use a single LLM. When that model hallucinates,
+    the customer publishes fabricated content. ConsensusPress validates every
+    claim across five providers. A single LLM is a liability. Consensus is
+    insurance.
+
+  two_layer_messaging:
+    wordpress_org_listing: |
+      "AI content that ranks in Google AND gets cited by AI search engines.
+      Five AI models validate every post. Hallucinations caught before
+      you publish. 81+ Rank Math scores proven across 164 posts."
+    agency_pitch: |
+      "Search survival infrastructure for the AI era. Your clients' content
+      validated by five independent AI providers. White-label reports.
+      Rescue service for posts that lost rankings to AI search."
+
+# =============================================================================
+# TARGET CUSTOMERS (ICP)
+# =============================================================================
+target_customers:
+
+  primary_icp: "WordPress agencies (10-50 client sites)"
+  reasoning: |
+    Agencies justify $149-499/month on ROI. They need differentiation,
+    reporting, and scale. One agency account = 50-200 posts/month.
+    Revenue per customer 5-10x solopreneur.
+
+  secondary_icp: "WordPress site owners (solopreneurs, SMBs)"
+  reasoning_2: |
+    Volume channel via WordPress.org. Lower price point ($49-99/month).
+    Drives installs, reviews, visibility. Converts to higher tiers.
+
+  execution_sequence:
+    phase_1: "WordPress plugin on WordPress.org for volume + proof + reviews"
+    phase_2: "Agency white-label for revenue + margins"
+    phase_3: "Affiliate markets (WarriorPlus) for broader reach"
+
+# =============================================================================
+# PRODUCT: TWO MODES, ONE ENGINE
+# =============================================================================
+product_modes:
+
+  mode_1_create:
+    name: "ConsensusPress Create"
+    status: "DELIVERED — v1.5.0"
+    user_action: "Enter topic + optional context in WP admin panel"
+    engine_action: |
+      Topic dispatched to Seekrates AI consensus engine via API.
+      Five LLMs respond independently. Quality scoring applied.
+      Refusals detected (12 patterns). Champion selected.
+      Synthesis generated. Oracle Risk Analysis produced.
+    wordpress_action: |
+      - Auto-import as draft post (NOT published — user reviews first)
+      - Featured image sideloaded from Unsplash with proper alt/title
+      - Rank Math metadata injected (focus keyword, meta description, SEO title)
+      - Schema markup inserted (FAQ + Article)
+      - Consensus score displayed in post meta box
+      - Post structured for AI-search optimisation (GEO/LLMO/AEO):
+        * 40-60 word paragraphs
+        * Question-format H2 headings
+        * Structured data for AI crawlers
+    user_reviews: "Draft appears in Posts list. User reviews, edits, publishes."
+    async_pattern: "Job scheduled via WP-Cron transient. AJAX polls every 5s. 120s timeout."
+
+  mode_2_rescue:
+    name: "ConsensusPress Rescue"
+    status: "DELIVERED — v1.5.0"
+    user_action: "Select existing published post from dropdown"
+    engine_action: |
+      Existing content fetched and analysed for GEO/LLMO/AEO gaps.
+      Content restructured through 5-LLM consensus pipeline.
+      Before/after comparison generated.
+    wordpress_action: |
+      - Rescued version saved as NEW DRAFT (original post NEVER modified — D-04-01)
+      - Side-by-side diff comparison visible in admin
+      - Original post ID stored in _consensuspress_original_post_id meta
+      - Schema and metadata updated in rescued version
+    user_reviews: "User compares original vs rescued via diff viewer. Publishes when satisfied."
+    async_pattern: "Same polling pattern as Create. Rescue costs 2 credits (Create costs 1)."
+    note_url_input: "URL input NOT implemented — dropdown only (spec simplification)"
+
+# =============================================================================
+# TECHNICAL ARCHITECTURE
+# =============================================================================
+architecture:
+
+  principle: |
+    Plugin is a THIN API CLIENT. All LLM intelligence stays on the
+    Seekrates AI Railway server. Plugin handles WordPress-native
+    delivery and UI only. This protects IP and keeps marginal cost
+    per query under Seekrates control.
+
+  communication:
+    protocol: "HTTPS REST API"
+    endpoint: "app.seekrates-ai.com/api/v1/consensus"
+    status: "ENDPOINT NOT YET BUILT — blocker B-01-01"
+    authentication: "Bearer token (API key stored in wp_options)"
+    timeout: "120 seconds"
+    retry: "Exponential backoff, max 3 attempts"
+    payload_out:
+      - "query (topic or existing content)"
+      - "mode (create | rescue)"
+      - "context (optional user-provided context)"
+      - "api_key"
+    payload_in:
+      - "champion_response (winning LLM output)"
+      - "synthesis (combined consensus view)"
+      - "consensus_score (percentage agreement)"
+      - "oracle_risk (disagreement analysis)"
+      - "individual_responses (all 5, for transparency)"
+      - "metadata (suggested title, focus keyword, meta description)"
+      - "schema_markup (FAQ + Article JSON-LD)"
+      - "featured_image_url (Unsplash)"
+
+  wordpress_integration:
+    post_creation:
+      - "wp_insert_post() — create draft with consensus content"
+      - "set_post_thumbnail() — sideload featured image"
+      - "update_post_meta() — Rank Math SEO fields"
+      - "wp_insert_term() — assign categories/tags from metadata"
+    rank_math_injection:
+      - "rank_math_focus_keyword"
+      - "rank_math_description"
+      - "rank_math_title"
+      - "rank_math_schema_Article"
+      - "rank_math_schema_FAQPage"
+    admin_ui:
+      - "Settings page (API key, default post status)"
+      - "Create page (topic input, context textarea, async submit + polling)"
+      - "Rescue page (published post dropdown, async submit + polling)"
+      - "Consensus meta box on post edit screen (score, risk, champion, mode)"
+      - "Diff comparison view (Rescue mode — side-by-side pure PHP)"
+
+  api_endpoint_requirements: |
+    NOTE: The Seekrates AI server (Railway) needs a new API endpoint
+    specifically for ConsensusPress. This is a thin wrapper around
+    the existing consensus_engine.py with JSON request/response
+    instead of the current web form + email delivery model.
+
+    New endpoint: POST /api/v1/consensus
+    Auth: Bearer token (API key)
+    Response: JSON (not email)
+
+    This is the ONLY change needed on the Seekrates AI side.
+
+# =============================================================================
+# WORDPRESS PLUGIN TECHNICAL ARCHITECTURE (v1.1.0)
+# =============================================================================
+wp_plugin_technical_architecture:
+
+  hook_system:
+    principle: "WordPress event-driven architecture — all plugin execution via hooks"
+    actions_registered:
+      - "plugins_loaded — boot all classes via consensuspress_init()"
+      - "admin_menu — register ConsensusPress admin pages (Settings, Create, Rescue)"
+      - "admin_enqueue_scripts — load admin CSS/JS on plugin pages only"
+      - "wp_ajax_consensuspress_test_connection — settings page API test"
+      - "wp_ajax_consensuspress_create_post — AJAX handler for Create mode"
+      - "wp_ajax_consensuspress_poll_job — AJAX polling for Create async results"
+      - "wp_ajax_consensuspress_rescue_post — AJAX handler for Rescue mode"
+      - "wp_ajax_consensuspress_poll_rescue_job — AJAX polling for Rescue async results"
+      - "add_meta_boxes — register consensus score meta box on post editor"
+      - "consensuspress_process_job (WP-Cron) — async job processor"
+    filters:
+      - "plugin_action_links — add Settings link to plugins list"
+
+  lifecycle_hooks:
+    activation:
+      hook: "register_activation_hook"
+      function: "consensuspress_activate()"
+    deactivation:
+      hook: "register_deactivation_hook"
+      function: "consensuspress_deactivate()"
+      actions:
+        - "Clear transients"
+        - "Unschedule WP-Cron events"
+        - "Do NOT delete data"
+    uninstall:
+      hook: "uninstall.php"
+      actions:
+        - "Delete 3 options: consensuspress_api_key, consensuspress_post_status, consensuspress_usage"
+        - "Delete 9 post_meta keys (_consensuspress_* prefix)"
+        - "Leave no trace"
+
+  persistence:
+    options_api:
+      keys:
+        - "consensuspress_api_key — Seekrates API key"
+        - "consensuspress_post_status — default post status (draft|pending)"
+        - "consensuspress_usage — serialised usage state (see usage_tracking)"
+
+    post_meta:
+      keys:
+        - "_consensuspress_score — float (0-100)"
+        - "_consensuspress_mode — create|rescue"
+        - "_consensuspress_champion_provider — winning LLM name"
+        - "_consensuspress_agreement_level — HIGH|MODERATE|LOW"
+        - "_consensuspress_oracle_risk_level — low|medium|high|critical"
+        - "_consensuspress_created_at — datetime of consensus query"
+        - "_consensuspress_original_post_id — int (Rescue: original post ID)"
+
+    transients:
+      - "consensuspress_job_{uuid} — async job state (TTL: 2 hours)"
+
+    usage_tracking:
+      storage: "wp_options key: consensuspress_usage (serialised array)"
+      note: "Custom DB table NOT implemented — wp_options chosen for simplicity"
+      fields:
+        - "credits_used — int"
+        - "credits_limit — int"
+        - "tier — free|starter|pro|business|agency|enterprise|unlimited"
+        - "reset_date — next monthly reset datetime string"
+        - "last_updated — datetime"
+      credit_costs:
+        create: 1
+        rescue: 2
+      default_tier: "free"
+      default_limit: 3
+      reset_mechanism: "auto-reset-on-read (monthly, no WP-Cron required)"
+      soft_gate: "check_quota() in AJAX handlers — blocks before scheduling"
+      hard_gate: "HTTP 402 from server triggers handle_quota_exceeded() — syncs local state"
+      admin_notice: "Shown at >=80% usage on ConsensusPress admin pages only"
+
+  security:
+    nonces:
+      - "consensuspress_test_connection"
+      - "consensuspress_create_post"
+      - "consensuspress_poll_job"
+      - "consensuspress_rescue_post"
+      - "consensuspress_poll_rescue_job"
+    sanitization: "sanitize_text_field(), sanitize_textarea_field(), absint() throughout"
+    escaping: "esc_html(), esc_attr(), esc_url() throughout"
+    capability_checks:
+      - "manage_options — settings page"
+      - "edit_posts — Create + Rescue operations"
+
+  async_pattern:
+    type: "WP-Cron + AJAX polling (REST+AJAX hybrid)"
+    create_flow:
+      - "JS submits topic → consensuspress_create_post handler"
+      - "Handler validates, schedules WP-Cron job, returns job_id"
+      - "JS polls every 5s → consensuspress_poll_job handler"
+      - "Handler reads transient, returns status (pending|processing|complete|failed)"
+      - "On complete: JS redirects to draft edit screen"
+    rescue_flow:
+      - "JS submits post_id → consensuspress_rescue_post handler"
+      - "Handler extracts post content (max 50,000 chars), schedules job, returns job_id"
+      - "JS polls every 5s → consensuspress_poll_rescue_job handler"
+      - "On complete: JS redirects to diff view"
+    timeout: "120 seconds (24 polls × 5s)"
+
+# =============================================================================
+# PLUGIN FILE STRUCTURE (DELIVERED v1.5.0)
+# =============================================================================
+file_structure:
+  consensuspress/:
+    consensuspress.php: "Main plugin file — v1.5.0"
+    uninstall.php: "Clean removal"
+    readme.txt: "WordPress.org listing"
+    includes/:
+      interface-consensuspress-transport.php: "HTTP transport interface (Sprint 1)"
+      class-consensuspress-api.php: "API client — all Seekrates communication (Sprint 1)"
+      class-consensuspress-settings.php: "Admin settings page (Sprint 1)"
+      class-consensuspress-post-builder.php: "Draft creation, image sideload, meta injection (Sprint 2)"
+      class-consensuspress-create.php: "Create mode page handler + asset enqueue (Sprint 2)"
+      class-consensuspress-async.php: "WP-Cron async job processor v1.2.0 (Sprints 3/4/5)"
+      class-consensuspress-meta-box.php: "Consensus score meta box on post edit screen (Sprint 3)"
+      class-consensuspress-rescue.php: "Rescue mode page handler + content extraction (Sprint 4)"
+      class-consensuspress-usage.php: "Credit tracking + tier enforcement (Sprint 5)"
+    admin/:
+      css/:
+        consensuspress-admin.css: "Admin styles v1.5.0 — Sprints 1-5 rules"
+      js/:
+        consensuspress-admin.js: "Settings page Test Connection handler (Sprint 1)"
+        consensuspress-create.js: "Create page AJAX submit + polling (Sprints 2/3)"
+        consensuspress-rescue.js: "Rescue page AJAX submit + polling (Sprint 4)"
+      views/:
+        settings.php: "Settings page template (Sprint 1)"
+        create.php: "Create Post page template (Sprint 2)"
+        meta-box.php: "Consensus meta box template (Sprint 3)"
+        meta-box-empty.php: "Meta box empty state (Sprint 3)"
+        rescue.php: "Rescue page template — post dropdown (Sprint 4)"
+        diff.php: "Side-by-side diff viewer template (Sprint 4)"
+    assets/:
+      README.txt: "Banner/icon specs for WordPress.org submission"
+      images/: "Empty — banner/icons to be created"
+    languages/:
+      consensuspress.pot: "Translation template"
+
+  files_NOT_built:
+    - "class-consensuspress-rank-math.php — merged into class-consensuspress-post-builder.php"
+    - "class-consensuspress-schema.php — merged into class-consensuspress-post-builder.php"
+    - "class-consensuspress-diff.php — diff viewer is pure PHP in diff.php template (no separate class)"
+    note: "HLR v1.1.0 listed these as separate files. Architectural decision to consolidate."
+
+# =============================================================================
+# PRICING
+# =============================================================================
+pricing:
+
+  free_tier:
+    posts_per_month: 3
+    price: "Free"
+    purpose: "WordPress.org volume + trial"
+
+  wordpress_org_tiers:
+    starter:
+      price: "$49/month"
+      credits_per_month: 10
+      note: "Create=1 credit, Rescue=2 credits"
+    pro:
+      price: "$99/month"
+      credits_per_month: 30
+    business:
+      price: "$199/month"
+      credits_per_month: 100
+
+  agency_white_label:
+    agency:
+      price: "$249/month"
+      credits_per_month: 50
+    enterprise:
+      price: "$499/month"
+      credits_per_month: 200
+
+  pay_as_you_go:
+    create_single: "$9/post"
+    rescue_single: "$19/post"
+
+  cost_basis: |
+    Engine cost per 5-provider query: $0.016-0.033
+    Gross margin at $49/month (10 posts): ~85%
+    Gross margin at $199/month (100 posts): ~92%
+    Gross margin at $499/month (200 posts): ~96%
+
+# =============================================================================
+# DISTRIBUTION CHANNELS
+# =============================================================================
+distribution:
+  channel_1: "WordPress.org Plugin Directory — Freemium (3 posts/month free)"
+  channel_2: "WarriorPlus — Affiliate-driven, 50% commission"
+  channel_3: "WarriorForum WSO — Direct listing"
+  channel_4: "Direct sales — consensuspress.com or seekrates-ai.com/plugin (Stripe)"
+  channel_5: "Agency outreach — white-label contracts"
+
+# =============================================================================
+# GO-TO-MARKET
+# =============================================================================
+go_to_market:
+  launch_sequence:
+    phase_1: "WordPress.org listing (free tier) — volume + reviews"
+    phase_2: "WarriorPlus + WarriorForum — affiliate-driven sales"
+    phase_3: "Case studies published — proof of ROI"
+    phase_4: "Agency outreach with white-label offering"
+
+  flywheel: |
+    ConsensusPress generates content → pages rank in Google + get cited by AI search
+    → organic visitors discover plugin → installs grow → more content generated
+    → blog/podcast reviews create backlinks → domain authority rises
+    → all pages rank better → cycle compounds
+
+# =============================================================================
+# TESTING (DELIVERED)
+# =============================================================================
+testing:
+
+  test_suite:
+    file: "tests/"
+    runner: "PHPUnit"
+    total_tests: 41
+    total_assertions: 69
+    status: "ALL PASSING"
+
+  test_files:
+    - { file: "test-api-client.php",   tests: 8,  sprint: 1 }
+    - { file: "test-settings.php",     tests: 4,  sprint: 1 }
+    - { file: "test-post-builder.php", tests: 11, sprint: 2 }
+    - { file: "test-async.php",        tests: 8,  sprint: 3 }
+    - { file: "test-meta-box.php",     tests: 6,  sprint: 3 }
+    - { file: "test-rescue.php",       tests: 8,  sprint: 4 }
+    - { file: "test-diff.php",         tests: 2,  sprint: 4 }
+    - { file: "test-usage.php",        tests: 8,  sprint: 5 }
+
+  afd_quality_gates:
+    - "Complete DNA headers on all PHP files ✅"
+    - "Strict typing throughout ✅"
+    - "No TODO/FIXME placeholders ✅"
+    - "No hardcoded secrets ✅"
+    - "All inputs sanitised, all outputs escaped ✅"
+    - "HAL-001 through HAL-008 scan clean ✅"
+    - "WordPress.org compliance: GPL v2+, no inline JS/CSS, nonces everywhere ✅"
+
+  wordpress_compatibility:
+    tested_up_to: "WordPress 6.7"
+    minimum_wp: "5.8"
+    minimum_php: "7.4"
+    rank_math: "Graceful degradation if not installed"
+
+# =============================================================================
+# SUCCESS METRICS
+# =============================================================================
+success_metrics:
+  launch_targets:
+    month_1: { installs: 100, active_subscribers: 20, revenue: "$500-1000" }
+    month_3: { installs: 500, active_subscribers: 100, revenue: "$3000-5000" }
+    month_6: { installs: 2000, active_subscribers: 300, revenue: "$10000+", agency_partnerships: 5 }
+
+  quality_targets:
+    rank_math_average: "81+ on generated posts"
+    wordpress_org_rating: "4.5+ stars"
+    support_tickets_per_100_installs: "<5"
+    api_uptime: "99.5%+"
+
+# =============================================================================
+# RISKS & MITIGATIONS
+# =============================================================================
+risks:
+  - { risk: "WordPress.org review rejection", likelihood: "Medium",
+      mitigation: "Strict WP coding standards from day one. HAL scan clean. No shortcuts." }
+  - { risk: "API latency (consensus takes 30-60 seconds)", likelihood: "High",
+      mitigation: "Async WP-Cron + AJAX polling delivered. Progress indicator in admin." }
+  - { risk: "Rank Math not installed", likelihood: "Medium",
+      mitigation: "Graceful degradation. Meta stored in post_meta. RM reads it if activated later." }
+  - { risk: "Seekrates API downtime", likelihood: "Low",
+      mitigation: "Exponential backoff retry (max 3). Clear error messages." }
+  - { risk: "Server endpoint build delay (B-01-01)", likelihood: "Current blocker",
+      mitigation: "Mock API spec exists. Plugin tested against mock. Live endpoint is one Railway deploy." }
+
+# =============================================================================
+# DEPENDENCIES
+# =============================================================================
+dependencies:
+  requires:
+    - "Seekrates AI server on Railway (existing, operational)"
+    - "POST /api/v1/consensus endpoint (TO BE BUILT — B-01-01)"
+    - "Stripe for subscription management (future)"
+    - "Unsplash API for featured images (existing integration)"
+  optional:
+    - "Rank Math SEO plugin (enhanced features when present)"
+
+# =============================================================================
+# BUILD SEQUENCE (AFD CYCLE) — STATUS
+# =============================================================================
+build_sequence:
+  step_1: "Server-side: New /api/v1/consensus endpoint on Railway ⏳ PENDING (B-01-01)"
+  step_2: "Plugin skeleton: activation, settings page, API key input ✅ Sprint 1"
+  step_3: "API client class: authentication, request/response, errors ✅ Sprint 1"
+  step_4: "Create mode: topic input → API call → draft post creation ✅ Sprint 2"
+  step_5: "Post builder: image sideload, Rank Math injection, schema ✅ Sprint 2"
+  step_6: "Rescue mode: post selector → extraction → API → draft ✅ Sprint 4"
+  step_7: "Diff viewer: before/after comparison UI ✅ Sprint 4"
+  step_8: "Consensus meta box: score display, risk flags ✅ Sprint 3"
+  step_9: "Usage tracking: credit count, tier enforcement ✅ Sprint 5"
+  step_10: "WordPress.org packaging: readme.txt, assets, submission ✅ Sprint 6"
+
+  async_pattern_delivered: "Sprint 3 — WP-Cron + AJAX polling replaces synchronous Sprint 2 approach"
+
+# =============================================================================
+# WORDPRESS.ORG COMPLIANCE
+# =============================================================================
+wordpress_org_compliance:
+  mandatory_all_met: true
+  plugin_header:
+    plugin_name: "ConsensusPress by Seekrates"
+    plugin_uri: "https://seekrates-ai.com/consensuspress"
+    description: "AI-search resilient content for WordPress. Five AI models validate every post."
+    version: "1.5.0"
+    author: "Mohan Iyer"
+    author_uri: "https://seekrates-ai.com"
+    license: "GPL v2 or later"
+    text_domain: "consensuspress"
+    requires_at_least: "5.8"
+    requires_php: "7.4"
+    tested_up_to: "6.7"
+
+  submission_checklist:
+    - "readme.txt in WordPress.org format ✅"
+    - "Stable tag matches plugin version ✅ (1.5.0)"
+    - "GPL v2+ license ✅"
+    - "Third-party service disclosure in readme.txt ✅"
+    - "Banner 1544×500 ⏳ (specs in assets/README.txt)"
+    - "Banner 772×250 ⏳"
+    - "Icon 256×256 ⏳"
+    - "Icon 128×128 ⏳"
+    - "5 screenshots ⏳"
+    - "SVN account at wordpress.org/plugins/developers ⏳"
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.2.0"
+    date: "2026-03-03"
+    author: "D-C (Session 08)"
+    changes: |
+      Updated to reflect v1.5.0 plugin delivery (Sessions 02-07).
+      Added: delivery_status section with blocker B-01-01.
+      Updated: file_structure to actual delivered files (9 PHP classes, not 11).
+      Updated: file names (meta-box.php not results-metabox.php, diff.php not diff-viewer.php).
+      Updated: persistence — usage stored in wp_options not custom table.
+      Updated: async pattern — WP-Cron + AJAX polling (not REST endpoints).
+      Updated: build_sequence with sprint-by-sprint status.
+      Updated: testing section with actual 41/41 test results.
+      Updated: submission_checklist with current status.
+      Added: blocker B-01-01 (server endpoint) to risks.
+
+  - version: "1.1.0"
+    date: "2026-02-25"
+    author: "D-C (Session 01 ConsensusPress)"
+    changes: |
+      Added: wp_plugin_technical_architecture section (10 subsections).
+      Added: uninstall.php, post_meta keys, usage table schema, AJAX polling pattern.
+
+  - version: "1.0.0"
+    date: "2026-02-25"
+    author: "D-C (Session 110)"
+    changes: "Initial HLR creation from Session 110 synthesis"
+
+# =============================================================================
+# END OF HLR
+# =============================================================================

@@ -1,0 +1,900 @@
+# =============================================================================
+# HALLUCINATION SEEDS — PHP/WORDPRESS EDITION v1.0.0
+# =============================================================================
+# Source:  Adapted from hallucination_seeds_complete.yaml (Python, 726 conversations)
+#          Extended with PHP/WordPress-specific patterns
+# Purpose: Prevent LLM hallucinations in PHP code generation
+# Usage:   Pre-delivery checklist for C-C, QC gate for D-C
+# Created: 2026-02-28
+# Author:  D-C @ ConsensusPress (Session 02)
+# Lineage: hallucination_seeds_complete.yaml → this file
+# =============================================================================
+# PHILOSOPHY:
+# The Python hallucination seeds were extracted from 726 real conversations.
+# PHP introduces ADDITIONAL hallucination patterns because:
+#   1. PHP's type system is weaker than Python's (no TypedDict, no Pydantic)
+#   2. WordPress global state creates invisible coupling
+#   3. PHP's array serves as list, dict, tuple, and struct simultaneously
+#   4. WordPress hooks execute in an order LLMs cannot predict
+#   5. PHP/WordPress has decades of legacy patterns LLMs hallucinate from
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: HAL CODES — CORE (Ported from Python + adapted)
+# =============================================================================
+# These are the foundational 8 markers, translated for PHP.
+# Detection commands use PHP-native tools, not Python's ast module.
+# =============================================================================
+
+hal_codes:
+
+  HAL-001:
+    name: "Type Erasure"
+    definition: "Using bare 'array' return/param types without PHPDoc shape annotation"
+    python_equivalent: "Dict[str, Any] — identical structural problem"
+    severity: "HIGH"
+
+    php_manifestations:
+      - pattern: "): array {"
+        description: "Function returns 'array' with no @return array{key: type}"
+        example_bad: |
+          /**
+           * Query the Seekrates API.
+           * @return array   ← TYPE ERASED. What keys? What types?
+           */
+          public function query( string $topic ): array {
+              // ...
+              return array(
+                  'success' => true,
+                  'data'    => $decoded,   // ← What's in $decoded?
+              );
+          }
+        example_good: |
+          /**
+           * Query the Seekrates API.
+           *
+           * @return array{
+           *   success:     bool,
+           *   data:        array{consensus_score: float, champion: array{provider: string, score: int}}|null,
+           *   error:       array{code: string, message: string}|null,
+           *   http_status: int
+           * }
+           */
+          public function query( string $topic ): array {
+              // ...
+          }
+
+      - pattern: ": mixed"
+        description: "Using 'mixed' hides all type information"
+        example_bad: |
+          function process_response( mixed $response ): mixed {
+        example_good: |
+          /**
+           * @param array{body: string, response: array{code: int}} $response
+           * @return array{success: bool, data: array|null}
+           */
+          function process_response( array $response ): array {
+
+      - pattern: "Untyped parameters"
+        description: "Function parameter with no type hint AND no @param"
+        example_bad: |
+          function build_post( $data ) {  // ← What is $data?
+        example_good: |
+          /**
+           * @param array{title: string, content: string, score: float} $data
+           */
+          function build_post( array $data ): int {
+
+    detection:
+      scanner: "hal001_php_scanner.php"
+      grep_quick: |
+        grep -rn "): array" includes/ | grep -v "@return array{"
+        grep -rn ": mixed" includes/
+      action: "Add PHPDoc array shape OR add runtime validation function"
+
+  HAL-002:
+    name: "Echo Tests"
+    definition: "Tests that always pass regardless of code correctness"
+    severity: "CRITICAL"
+
+    php_manifestations:
+      - pattern: "$this->assertTrue( true )"
+        description: "Assertion that can never fail"
+      - pattern: "$this->assertIsArray( $result )"
+        description: "Weak assertion — passes for ANY array, regardless of contents"
+        note: |
+          In PHP, assertIsArray is the EQUIVALENT of Python's 'assert True'
+          when testing a function that returns array. It proves the function
+          returned something. It proves nothing about correctness.
+      - pattern: "$this->assertNotEmpty( $result )"
+        description: "Proves non-emptiness. Proves nothing about structure or values."
+
+    example_bad: |
+      public function test_create_query() {
+          $result = $api->query( 'test topic', 'create' );
+          $this->assertIsArray( $result );     // ← ECHO TEST
+          $this->assertNotEmpty( $result );     // ← ECHO TEST
+      }
+    example_good: |
+      public function test_create_query() {
+          $result = $api->query( 'test topic', 'create' );
+          $this->assertTrue( $result['success'] );
+          $this->assertArrayHasKey( 'consensus_score', $result['data'] );
+          $this->assertEquals( 200, $result['http_status'] );
+          $this->assertNull( $result['error'] );
+      }
+
+    detection:
+      grep: |
+        grep -rn "assertTrue( true\|assertTrue(true" tests/
+        grep -rn "assertIsArray" tests/ | grep -v "assertArrayHasKey"
+      action: "Replace with specific value assertions"
+
+  HAL-003:
+    name: "Undefined Calls"
+    definition: "Calling functions, methods, or WordPress hooks that don't exist"
+    severity: "CRITICAL"
+
+    php_manifestations:
+      - pattern: "Invented WordPress functions"
+        description: "LLM hallucinates WP functions that don't exist"
+        examples:
+          - "wp_get_current_post()       ← Does not exist. Use get_post()."
+          - "wp_sanitize_input()         ← Does not exist. Use sanitize_text_field()."
+          - "wp_validate_nonce()         ← Does not exist. Use wp_verify_nonce()."
+          - "register_admin_page()       ← Does not exist. Use add_menu_page()."
+          - "wp_enqueue_admin_script()   ← Does not exist. Use wp_enqueue_script()."
+          - "get_plugin_option()         ← Does not exist. Use get_option()."
+          - "wp_create_post()            ← Does not exist. Use wp_insert_post()."
+          - "wp_get_attachment_image_url_full() ← Does not exist."
+      - pattern: "Invented Rank Math functions"
+        description: "LLM hallucinates Rank Math API that doesn't exist"
+        examples:
+          - "rank_math_set_score()       ← Does not exist. Use update_post_meta()."
+          - "rank_math_get_seo_data()    ← Does not exist. Meta keys are direct."
+          - "RankMath::get_instance()    ← Exists but undocumented — fragile."
+      - pattern: "Wrong hook names"
+        description: "LLM invents hook names that WordPress doesn't fire"
+        examples:
+          - "add_action('wp_admin_loaded', ...) ← Does not exist. Use admin_init."
+          - "add_action('post_created', ...)    ← Does not exist. Use save_post."
+          - "add_filter('the_seo_title', ...)   ← Does not exist."
+
+    detection:
+      method: "Cross-reference every WP function call against developer.wordpress.org"
+      action: "Verify EVERY WordPress/Rank Math function exists before using"
+
+  HAL-004:
+    name: "Placeholders"
+    definition: "TODO, FIXME, NotImplemented left in production code"
+    severity: "MEDIUM"
+
+    php_manifestations:
+      - pattern: "// TODO:"
+      - pattern: "// FIXME:"
+      - pattern: "// HACK:"
+      - pattern: "throw new \\Exception( 'Not implemented' );"
+      - pattern: "return array(); // placeholder"
+
+    detection:
+      grep: 'grep -rn "TODO\|FIXME\|HACK\|Not implemented\|placeholder" includes/ admin/'
+      action: "Complete implementation or explicitly defer in CCI"
+
+  HAL-005:
+    name: "Invented Imports"
+    definition: "require/include of files or classes that don't exist"
+    severity: "CRITICAL"
+
+    php_manifestations:
+      - pattern: "Invented class files"
+        examples:
+          - "require_once 'class-consensuspress-validator.php'; ← File doesn't exist"
+          - "use ConsensusPress\\Validator;                    ← Namespace doesn't exist"
+      - pattern: "Invented Composer packages"
+        examples:
+          - "use Symfony\\Component\\HttpClient;  ← Not installed"
+          - "use GuzzleHttp\\Client;              ← Not installed (WP uses wp_remote_*)"
+        note: |
+          WordPress plugins should NOT use Composer autoloading in most cases.
+          WP uses require_once with manual file loading.
+          LLMs trained on Laravel/Symfony hallucinate Composer patterns into WP plugins.
+      - pattern: "Wrong WordPress include paths"
+        examples:
+          - "require_once ABSPATH . 'wp-includes/class-wp-query.php'; ← Don't include WP core directly"
+          - "require_once WP_PLUGIN_DIR . '/rank-math/...';           ← Never include other plugins"
+
+    detection:
+      method: "Verify every require/include path resolves to an actual file"
+      action: "Map all includes in D6 import specification"
+
+  HAL-006:
+    name: "Silent Exceptions"
+    definition: "Catching exceptions without handling or logging"
+    severity: "HIGH"
+
+    php_manifestations:
+      - pattern_1:
+          name: "Bare catch with no action"
+          bad: |
+            try {
+                $result = json_decode( $body, true );
+            } catch ( \Exception $e ) {
+                // Silent failure
+            }
+          good: |
+            $result = json_decode( $body, true );
+            if ( null === $result && json_last_error() !== JSON_ERROR_NONE ) {
+                return array(
+                    'success' => false,
+                    'error'   => array(
+                        'code'    => 'invalid_response',
+                        'message' => 'Invalid JSON: ' . json_last_error_msg(),
+                    ),
+                );
+            }
+
+      - pattern_2:
+          name: "WordPress error ignored"
+          bad: |
+            $response = wp_remote_post( $url, $args );
+            $body = wp_remote_retrieve_body( $response );  // ← What if $response is WP_Error?
+          good: |
+            $response = wp_remote_post( $url, $args );
+            if ( is_wp_error( $response ) ) {
+                return array( 'success' => false, 'error' => $response->get_error_message() );
+            }
+            $body = wp_remote_retrieve_body( $response );
+
+    detection:
+      grep: |
+        grep -rn "catch.*{" includes/ | grep -A2 "}" | grep -v "log\|throw\|return\|error"
+        grep -rn "wp_remote_" includes/ | grep -v "is_wp_error"
+      action: "Every error path must produce a structured error return"
+
+  HAL-007:
+    name: "Hardcoded Secrets"
+    definition: "API keys, passwords, tokens in source code"
+    severity: "CRITICAL"
+
+    php_manifestations:
+      - pattern: "Direct string assignment"
+        bad: "$api_key = 'sk-1234567890abcdef';"
+        good: "$api_key = get_option( 'consensuspress_api_key', '' );"
+      - pattern: "Default parameter with real value"
+        bad: "function connect( $key = 'real-api-key-here' ) {"
+        good: "function connect( $key = '' ) {"
+      - pattern: "Debug credentials in test files"
+        bad: |
+          // In test file:
+          $api = new API( 'sk-real-key-from-env' );
+        good: |
+          $api = new API( 'test-key-1234', $mock_transport );
+
+    detection:
+      grep: |
+        grep -rn "sk-\|api_key.*=.*['\"][a-zA-Z0-9]\{20,\}" includes/ tests/
+        grep -rn "password.*=.*['\"]" includes/
+      action: "All secrets from get_option() or environment. Never in code."
+
+  HAL-008:
+    name: "Unverified Assumptions"
+    definition: "Code assumes data/state exists without validation"
+    severity: "HIGH"
+
+    php_manifestations:
+      - pattern: "Bare array access on API response"
+        bad: |
+          $data = json_decode( $body, true );
+          $score = $data['consensus_score'];      // ← KeyError if missing
+          $champion = $data['champion']['provider']; // ← Nested KeyError
+        good: |
+          $data = json_decode( $body, true );
+          if ( ! isset( $data['consensus_score'], $data['champion']['provider'] ) ) {
+              return array( 'success' => false, 'error' => 'Malformed response' );
+          }
+          $score = $data['consensus_score'];
+          $champion = $data['champion']['provider'];
+
+      - pattern: "WordPress state assumptions"
+        bad: |
+          $post = get_post( $post_id );
+          echo $post->post_title;  // ← What if get_post returns null?
+        good: |
+          $post = get_post( $post_id );
+          if ( ! $post instanceof WP_Post ) {
+              return new WP_Error( 'not_found', 'Post not found.' );
+          }
+          echo esc_html( $post->post_title );
+
+      - pattern: "Plugin dependency assumptions"
+        bad: |
+          // Assumes Rank Math is installed and active
+          update_post_meta( $post_id, 'rank_math_focus_keyword', $keyword );
+        good: |
+          if ( class_exists( 'RankMath' ) || defined( 'RANK_MATH_VERSION' ) ) {
+              update_post_meta( $post_id, 'rank_math_focus_keyword', $keyword );
+          }
+
+    detection:
+      method: "Manual review — look for array access without isset/array_key_exists"
+      grep: |
+        grep -rn "\$data\['" includes/ | grep -v "isset\|array_key_exists"
+        grep -rn "->post_title\|->post_content" includes/ | grep -v "instanceof"
+
+# =============================================================================
+# SECTION 2: HAL CODES — PHP-SPECIFIC (New, not in Python edition)
+# =============================================================================
+# These hallucination patterns are UNIQUE to PHP/WordPress and have no
+# direct Python equivalent. They are the most dangerous because LLMs
+# trained on mixed PHP codebases hallucinate these at very high rates.
+# =============================================================================
+
+hal_codes_php_specific:
+
+  HAL-PHP-001:
+    name: "WordPress Hook Hallucination"
+    definition: "Using wrong hook names, wrong priorities, or wrong callback signatures"
+    severity: "CRITICAL"
+    python_equivalent: "None — WordPress-specific"
+
+    manifestations:
+      - type: "Invented hook names"
+        bad: "add_action( 'wp_admin_loaded', array( $this, 'init' ) );"
+        good: "add_action( 'admin_init', array( $this, 'init' ) );"
+        note: "wp_admin_loaded does not exist. LLMs conflate admin_init, admin_menu, wp_loaded."
+
+      - type: "Wrong callback argument count"
+        bad: |
+          add_action( 'save_post', array( $this, 'save_meta' ) );
+          // Later:
+          public function save_meta( $post_id, $post, $update ) {
+              // ← save_post passes 3 args but add_action default accepted_args is 1
+          }
+        good: |
+          add_action( 'save_post', array( $this, 'save_meta' ), 10, 3 );
+
+      - type: "Filter returns wrong type"
+        bad: |
+          add_filter( 'the_content', function( $content ) {
+              // Forgot to return $content
+              echo 'Modified: ' . $content;
+          } );
+        good: |
+          add_filter( 'the_content', function( $content ) {
+              return $content . '<p>Appended.</p>';
+          } );
+
+    detection:
+      method: "Cross-reference every hook name against developer.wordpress.org/reference/hooks/"
+      scanner: "wp_compliance_scanner.php checks for common invented hooks"
+
+  HAL-PHP-002:
+    name: "Array/Dict Conflation"
+    definition: "Treating PHP arrays as if they were Python dicts or JS objects"
+    severity: "HIGH"
+    python_equivalent: "Partial — PHP's array is uniquely dangerous"
+
+    the_problem: |
+      PHP's array is a list, a dict, a tuple, and a struct simultaneously.
+      LLMs trained on Python use dict patterns. LLMs trained on JS use
+      object patterns. Both produce subtle bugs in PHP.
+
+    manifestations:
+      - type: "Assuming string keys"
+        bad: |
+          $items = array( 'apple', 'banana', 'cherry' );
+          echo $items['first'];  // ← PHP indexed arrays have int keys, not 'first'
+        note: "LLM confuses PHP indexed arrays with Python dicts or JS objects"
+
+      - type: "Mixed key types"
+        bad: |
+          $data = array(
+              'name' => 'Alice',
+              0      => 'first item',   // ← Mixed string and int keys
+          );
+        note: "Valid PHP but almost always a bug. LLMs produce this freely."
+
+      - type: "in_array without strict"
+        bad: |
+          if ( in_array( $status, $allowed ) ) {  // ← Type coercion: 0 == 'draft' is true
+        good: |
+          if ( in_array( $status, $allowed, true ) ) {  // strict comparison
+        note: "PHP's loose comparison is the #1 source of security bugs in plugins"
+
+    detection:
+      grep: |
+        grep -rn "in_array" includes/ | grep -v "true )"
+      action: "ALWAYS use strict comparison (third param = true)"
+
+  HAL-PHP-003:
+    name: "WordPress Global State Hallucination"
+    definition: "Assuming WordPress globals or state exists at a given execution point"
+    severity: "HIGH"
+    python_equivalent: "None — WordPress-specific"
+
+    manifestations:
+      - type: "Using $post global before loop"
+        bad: |
+          global $post;
+          $title = $post->post_title;  // ← $post may be null outside The Loop
+        good: |
+          $post = get_post( $post_id );
+          if ( $post ) {
+              $title = $post->post_title;
+          }
+
+      - type: "Calling functions before they're loaded"
+        bad: |
+          // In plugin constructor, called at plugins_loaded:
+          $categories = get_categories();  // ← Taxonomy may not be registered yet
+        good: |
+          // Hook to 'init' or later for taxonomy operations
+          add_action( 'init', function() {
+              $categories = get_categories();
+          } );
+
+      - type: "Assuming admin context"
+        bad: |
+          function my_function() {
+              $screen = get_current_screen();  // ← null on frontend
+              echo $screen->id;
+          }
+        good: |
+          function my_function() {
+              if ( ! is_admin() ) { return; }
+              $screen = get_current_screen();
+              if ( ! $screen ) { return; }
+              echo esc_html( $screen->id );
+          }
+
+  HAL-PHP-004:
+    name: "Sanitization/Escaping Confusion"
+    definition: "Using wrong sanitization function or escaping at wrong layer"
+    severity: "CRITICAL"
+    python_equivalent: "None — WordPress security model specific"
+
+    the_rule: |
+      SANITIZE on INPUT (before storage): sanitize_text_field, absint, sanitize_email
+      ESCAPE on OUTPUT (before display):  esc_html, esc_attr, esc_url, wp_kses
+
+      LLMs confuse these constantly. The #1 WordPress.org rejection reason.
+
+    manifestations:
+      - type: "Escaping on input"
+        bad: |
+          $name = esc_html( $_POST['name'] );            // ← esc_html is for OUTPUT
+          update_option( 'my_name', $name );
+        good: |
+          $name = sanitize_text_field( $_POST['name'] );  // ← sanitize for INPUT
+          update_option( 'my_name', $name );
+
+      - type: "Sanitizing on output"
+        bad: |
+          echo sanitize_text_field( $option );  // ← sanitize is for INPUT
+        good: |
+          echo esc_html( $option );              // ← escape for OUTPUT
+
+      - type: "Missing escaping in templates"
+        bad: |
+          <input value="<?php echo $value; ?>">           // ← XSS vulnerability
+        good: |
+          <input value="<?php echo esc_attr( $value ); ?>">
+
+      - type: "wp_kses misuse"
+        bad: |
+          echo wp_kses( $content, 'post' );  // ← 'post' is not a valid $allowed_html
+        good: |
+          echo wp_kses_post( $content );      // ← Correct shorthand for post context
+
+    detection:
+      scanner: "wp_compliance_scanner.php — HAL-WP-001, HAL-WP-002"
+      grep: |
+        grep -rn "echo \$\|echo get_option" includes/ admin/ | grep -v "esc_\|wp_kses"
+        grep -rn "esc_html.*\$_POST\|esc_attr.*\$_GET" includes/
+
+  HAL-PHP-005:
+    name: "Nonce Lifecycle Hallucination"
+    definition: "Wrong nonce creation, verification, or lifetime assumptions"
+    severity: "HIGH"
+    python_equivalent: "None — WordPress CSRF model specific"
+
+    manifestations:
+      - type: "Nonce name mismatch"
+        bad: |
+          // Creating:
+          wp_nonce_field( 'save_settings' );
+          // Verifying (different name!):
+          wp_verify_nonce( $_POST['_wpnonce'], 'update_settings' );  // ← MISMATCH
+        good: |
+          wp_nonce_field( 'consensuspress_save_settings' );
+          // ...
+          if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'consensuspress_save_settings' ) ) {
+              die( 'Security check failed' );
+          }
+
+      - type: "Nonce not verified"
+        description: "AJAX handler processes request without nonce check"
+        bad: |
+          add_action( 'wp_ajax_my_action', function() {
+              // No nonce check — CSRF vulnerability
+              $data = sanitize_text_field( $_POST['data'] );
+          } );
+        good: |
+          add_action( 'wp_ajax_my_action', function() {
+              check_ajax_referer( 'my_action_nonce', 'nonce' );
+              $data = sanitize_text_field( $_POST['data'] );
+          } );
+
+      - type: "Nonce lifetime assumption"
+        description: "LLM assumes nonces last indefinitely"
+        reality: "WordPress nonces have a 24-hour lifetime (two 12-hour ticks)"
+        risk: "For 30-60 second consensus queries this is fine. For cron jobs it may not be."
+
+  HAL-PHP-006:
+    name: "Framework Bleed"
+    definition: "Using Laravel/Symfony/Slim patterns in WordPress context"
+    severity: "HIGH"
+    python_equivalent: "None — PHP ecosystem confusion"
+
+    the_problem: |
+      LLMs trained on modern PHP frameworks hallucinate their patterns
+      into WordPress plugins. WordPress has its OWN way of doing everything.
+      Mixing frameworks creates code that looks correct but fails at runtime.
+
+    manifestations:
+      - type: "Laravel-style routing"
+        bad: |
+          Route::post( '/api/create', [CreateController::class, 'store'] );
+        good: |
+          add_action( 'rest_api_init', function() {
+              register_rest_route( 'consensuspress/v1', '/create', array(
+                  'methods'  => 'POST',
+                  'callback' => array( $this, 'handle_create' ),
+                  'permission_callback' => function() { return current_user_can( 'edit_posts' ); },
+              ) );
+          } );
+
+      - type: "Eloquent-style database"
+        bad: |
+          Post::where( 'status', 'draft' )->get();
+        good: |
+          $posts = get_posts( array( 'post_status' => 'draft' ) );
+
+      - type: "Dependency injection containers"
+        bad: |
+          $container->bind( TransportInterface::class, WPTransport::class );
+        good: |
+          $transport = new ConsensusPress_WP_Transport();
+          $api = new ConsensusPress_API( $key, $transport );
+        note: "Constructor injection is fine. DI containers are not WordPress."
+
+      - type: "PSR-4 autoloading in plugins"
+        bad: |
+          // composer.json autoload in a simple WP plugin
+          "autoload": { "psr-4": { "ConsensusPress\\": "src/" } }
+        good: |
+          // Direct requires in main plugin file
+          require_once CONSENSUSPRESS_PLUGIN_DIR . 'includes/class-consensuspress-api.php';
+        note: |
+          PSR-4 is acceptable for LARGE plugins (WooCommerce-scale).
+          For ConsensusPress with <15 classes, require_once is simpler and
+          avoids Composer dependency that WordPress.org reviewers may question.
+
+  HAL-PHP-007:
+    name: "PHP Version Hallucination"
+    definition: "Using PHP features not available in target version (7.4)"
+    severity: "HIGH"
+    python_equivalent: "Using Python 3.10+ syntax in 3.9 target"
+
+    forbidden_in_php_74:
+      - feature: "Union types"
+        syntax: "function foo(): string|int"
+        available_from: "PHP 8.0"
+        workaround: "Use PHPDoc: @return string|int"
+      - feature: "Named arguments"
+        syntax: "foo( name: 'value' )"
+        available_from: "PHP 8.0"
+        workaround: "Use positional arguments or arrays"
+      - feature: "Match expressions"
+        syntax: "match($x) { 1 => 'one', 2 => 'two' }"
+        available_from: "PHP 8.0"
+        workaround: "Use switch statements"
+      - feature: "Enums"
+        syntax: "enum Status: string { case Draft = 'draft'; }"
+        available_from: "PHP 8.1"
+        workaround: "Use class constants"
+      - feature: "Readonly properties"
+        syntax: "public readonly string $name;"
+        available_from: "PHP 8.1"
+        workaround: "Use private property + getter"
+      - feature: "Constructor property promotion"
+        syntax: "public function __construct( private string $name ) {}"
+        available_from: "PHP 8.0"
+        workaround: "Explicit property declaration + assignment"
+      - feature: "Nullsafe operator"
+        syntax: "$user?->getAddress()?->getCity()"
+        available_from: "PHP 8.0"
+        workaround: "Explicit null checks"
+      - feature: "Fibers"
+        syntax: "new Fiber( function() {} )"
+        available_from: "PHP 8.1"
+        workaround: "Not applicable in WordPress context"
+      - feature: "Intersection types"
+        syntax: "function foo( Countable&Iterator $x )"
+        available_from: "PHP 8.1"
+        workaround: "Use interface that extends both"
+
+    detection:
+      method: "Run php -l with PHP 7.4 binary, or use PHPCompatibility PHPCS ruleset"
+      grep_quick: |
+        grep -rn "): .*|.*{" includes/    # Union types
+        grep -rn "match(" includes/        # Match expressions
+        grep -rn "readonly " includes/     # Readonly properties
+        grep -rn "enum " includes/         # Enums
+
+  HAL-PHP-008:
+    name: "Media/Upload Hallucination"
+    definition: "Incorrectly handling WordPress media sideloading and attachments"
+    severity: "MEDIUM"
+    python_equivalent: "None — WordPress media model specific"
+
+    manifestations:
+      - type: "Missing media dependency"
+        bad: |
+          $image_id = media_sideload_image( $url, $post_id );
+          // ← media_sideload_image not available by default
+        good: |
+          if ( ! function_exists( 'media_sideload_image' ) ) {
+              require_once ABSPATH . 'wp-admin/includes/media.php';
+              require_once ABSPATH . 'wp-admin/includes/file.php';
+              require_once ABSPATH . 'wp-admin/includes/image.php';
+          }
+          $image_id = media_sideload_image( $url, $post_id, '', 'id' );
+
+      - type: "Wrong return type assumption"
+        bad: |
+          $image_id = media_sideload_image( $url, $post_id );
+          set_post_thumbnail( $post_id, $image_id );  // ← Returns HTML by default, not ID
+        good: |
+          $image_id = media_sideload_image( $url, $post_id, '', 'id' );  // 4th param = 'id'
+          if ( ! is_wp_error( $image_id ) ) {
+              set_post_thumbnail( $post_id, $image_id );
+          }
+
+# =============================================================================
+# SECTION 3: CODE PATTERN MARKERS (Behavioral — same structure as Python)
+# =============================================================================
+
+code_pattern_markers:
+
+  magic_parameters:
+    name: "Magic Parameters"
+    definition: "Function parameter with no verified source"
+    trigger_question: "WHERE does this parameter come from? WHO calls this?"
+    php_example: |
+      // RED FLAG
+      function build_draft( $consensus_data, $settings ) {
+          // ← What shape is $consensus_data? What keys does $settings have?
+      }
+    action: "PHPDoc @param with array shape. Or typed class/interface."
+
+  fabricated_test_data:
+    name: "Fabricated Test Data"
+    definition: "json_encode() with invented API responses in tests"
+    trigger_question: "Did I verify this matches the ACTUAL Seekrates API response?"
+    php_note: |
+      ConsensusPress uses fixtures from consensuspress_mock_api.yaml.
+      C-C copies fixture JSON VERBATIM. No invention. No improvisation.
+    action: "All test data from mock_api.yaml fixtures. Zero fabrication."
+
+  wordpress_hook_assumptions:
+    name: "Hook Execution Order Assumptions"
+    definition: "Assuming hooks fire in a specific order without verification"
+    php_specific: true
+    trigger_question: "Have I verified when this hook fires relative to my code?"
+    common_mistakes:
+      - "Registering post meta before 'init' fires"
+      - "Accessing current_screen before 'current_screen' action"
+      - "Enqueuing scripts before 'wp_enqueue_scripts' / 'admin_enqueue_scripts'"
+      - "Expecting Settings API callbacks before 'admin_init'"
+
+  database_assumption:
+    name: "Database State Assumptions"
+    definition: "Assuming options/meta exist without checking"
+    php_specific: true
+    trigger_question: "What if this option was never set? What if the post was deleted?"
+    example_bad: |
+      $tier = get_option( 'consensuspress_tier' );
+      if ( $tier === 'enterprise' ) { ... }
+      // ← get_option returns false if option doesn't exist. false !== 'enterprise'.
+      // But false == '' in loose comparison. Use strict === always.
+    example_good: |
+      $tier = get_option( 'consensuspress_tier', 'free' );  // Always provide default.
+      if ( 'enterprise' === $tier ) { ... }                   // Yoda condition + strict.
+
+# =============================================================================
+# SECTION 4: STOP-AND-CHECK QUESTIONS (PHP/WP Adapted)
+# =============================================================================
+
+stop_and_check:
+
+  before_any_function:
+    - "Does the function signature have TYPED parameters? (type hint + PHPDoc)"
+    - "Does the @return annotation specify the array SHAPE, not just 'array'?"
+    - "WHO calls this function? Is it a hook callback, AJAX handler, or direct call?"
+    - "If it's a hook callback: is the hook name VERIFIED against WP developer reference?"
+    - "If it accepts array: is every key access guarded with isset()?"
+
+  before_any_test:
+    - "Is this test data from a REAL fixture (mock_api.yaml)?"
+    - "Am I asserting SPECIFIC values, not just 'is array' or 'not empty'?"
+    - "What happens with malformed input?"
+    - "Does this test actually FAIL if the code is broken?"
+
+  before_any_wp_function_call:
+    - "Does this function EXIST? (Check developer.wordpress.org)"
+    - "Am I calling it at the right HOOK PRIORITY?"
+    - "Have I checked the RETURN TYPE? (WP functions often return false/WP_Error)"
+    - "If it returns WP_Error, am I checking with is_wp_error()?"
+
+  before_any_output:
+    - "Is every variable ESCAPED? (esc_html, esc_attr, esc_url, wp_kses_post)"
+    - "Am I using the RIGHT escape function for the context?"
+    - "Is user input SANITIZED before storage?"
+
+  before_any_import:
+    - "Does this file EXIST in the plugin directory?"
+    - "Am I using require_once (not require, include, or autoload)?"
+    - "Is this a WordPress core file that's already loaded?"
+
+# =============================================================================
+# SECTION 5: PRE-DELIVERY CHECKLIST (C-C Gate — PHP Edition)
+# =============================================================================
+
+pre_delivery_checklist:
+
+  automated_scans:
+    - tool: "hal001_php_scanner.php"
+      hal_code: "HAL-001"
+      gate: "exit 0"
+      action_if_found: "Add PHPDoc array shapes or runtime validation"
+
+    - tool: "wp_compliance_scanner.php"
+      codes: "HAL-WP-001 through HAL-WP-008"
+      gate: "exit 0"
+      action_if_found: "Fix sanitization, escaping, nonces per scanner report"
+
+    - tool: "php -l"
+      purpose: "Syntax check"
+      gate: "No parse errors"
+
+    - command: 'grep -rn "assertTrue( true\|assertIsArray.*result" tests/'
+      hal_code: "HAL-002"
+      action_if_found: "Replace with specific value assertions"
+
+    - command: 'grep -rn "TODO\|FIXME\|HACK\|Not implemented" includes/ admin/'
+      hal_code: "HAL-004"
+      action_if_found: "Complete or defer with tracking"
+
+    - command: 'grep -rn "except.*pass\|catch.*{}" includes/'
+      hal_code: "HAL-006"
+      action_if_found: "Add error handling"
+
+    - command: 'grep -rn "sk-\|password.*=.*[a-zA-Z0-9]" includes/'
+      hal_code: "HAL-007"
+      action_if_found: "Move to get_option or environment"
+
+    - command: 'grep -rn "in_array" includes/ | grep -v "true )"'
+      hal_code: "HAL-PHP-002"
+      action_if_found: "Add strict=true parameter"
+
+    - command: 'grep -rn "): .*|.*{" includes/'
+      hal_code: "HAL-PHP-007"
+      action_if_found: "Remove PHP 8.0+ syntax — target is PHP 7.4"
+
+  manual_checks:
+    - "Every WordPress function call verified against developer.wordpress.org?"
+    - "Every hook name verified against hooks reference?"
+    - "Every array access guarded with isset() or array_key_exists()?"
+    - "All forms have wp_nonce_field() / check_ajax_referer()?"
+    - "All admin actions have current_user_can() check?"
+    - "No inline JS/CSS in templates?"
+
+# =============================================================================
+# SECTION 6: UNIVERSAL PRINCIPLE
+# =============================================================================
+
+universal_principle: |
+  Every item in this document exists because an LLM generated it incorrectly
+  at least once in a real project. These are not theoretical risks.
+
+  The core question is always the same:
+    "WHERE DOES THIS COME FROM?"
+
+  If you cannot trace a parameter to its producer, a function to its
+  definition, a hook to its WordPress reference, or a fixture to its
+  mock API spec — STOP. The gap is where the hallucination lives.
+
+  This principle is language-agnostic. The manifestations differ between
+  Python and PHP. The disease is the same.
+
+# =============================================================================
+# SECTION 7: INTEGRATION WITH AFD
+# =============================================================================
+
+afd_integration:
+
+  D1_type_annotations:
+    prevents: ["HAL-001", "HAL-008", "HAL-PHP-002"]
+    php_method: "PHPDoc array shapes + runtime key validation"
+    note: "Weaker than Python Pydantic. Compensated by scanner + runtime checks."
+
+  D2_double_entry:
+    prevents: ["Magic Parameters", "HAL-PHP-003"]
+    php_method: "Same D2 contracts — OUTPUT/INPUT pairs with named consumers/producers"
+
+  D3_api_contracts:
+    prevents: ["HAL-003", "HAL-005", "HAL-PHP-001"]
+    php_method: "All WP function calls verified. All hook names verified."
+
+  D4_test_scenarios:
+    prevents: ["HAL-002", "Fabricated Test Data"]
+    php_method: "Tests from mock_api.yaml fixtures. Specific value assertions."
+
+  D0_preservation:
+    prevents: ["HAL-PHP-006 (framework bleed causing function loss)"]
+    php_method: "inventory_php.php generates D0. diff_inventories_php.php enforces."
+
+  wp_compliance:
+    prevents: ["HAL-PHP-004", "HAL-PHP-005"]
+    php_method: "wp_compliance_scanner.php catches sanitization/escaping/nonce failures"
+
+# =============================================================================
+# SECTION 8: COMPARISON — PYTHON vs PHP HAL CODES
+# =============================================================================
+
+comparison:
+  shared_codes:
+    HAL-001: "Type erasure — Dict[str, Any] ↔ bare 'array'"
+    HAL-002: "Echo tests — identical problem in both languages"
+    HAL-003: "Undefined calls — wp functions more dangerous (global namespace)"
+    HAL-004: "Placeholders — identical"
+    HAL-005: "Invented imports — PHP adds Composer/framework confusion"
+    HAL-006: "Silent exceptions — PHP adds WP_Error pattern"
+    HAL-007: "Hardcoded secrets — identical"
+    HAL-008: "Unverified assumptions — PHP adds WP global state"
+
+  php_only_codes:
+    HAL-PHP-001: "WordPress hook hallucination — no Python equivalent"
+    HAL-PHP-002: "Array/dict conflation — PHP's array is uniquely problematic"
+    HAL-PHP-003: "WordPress global state — no Python equivalent"
+    HAL-PHP-004: "Sanitization/escaping confusion — WordPress security model"
+    HAL-PHP-005: "Nonce lifecycle hallucination — WordPress CSRF model"
+    HAL-PHP-006: "Framework bleed — Laravel/Symfony patterns in WP context"
+    HAL-PHP-007: "PHP version hallucination — 7.4 target constraints"
+    HAL-PHP-008: "Media/upload hallucination — WordPress media model"
+
+  total_hal_codes:
+    python: 8
+    php: 16   # 8 core (adapted) + 8 PHP-specific
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-28"
+    author: "D-C (Session 02, ConsensusPress)"
+    lineage: "hallucination_seeds_complete.yaml (Python, 726 conversations)"
+    changes: |
+      Initial PHP/WordPress edition.
+      8 core HAL codes adapted from Python with PHP examples.
+      8 new PHP-specific HAL codes (HAL-PHP-001 through HAL-PHP-008).
+      PHP-specific code pattern markers.
+      WordPress stop-and-check questions.
+      Pre-delivery checklist with PHP scanner commands.
+      Comparison table: Python vs PHP.
+
+# =============================================================================
+# END OF DOCUMENT
+# =============================================================================

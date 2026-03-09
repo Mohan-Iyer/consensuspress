@@ -1,0 +1,383 @@
+# =============================================================================
+# CONSENSUSPRESS RE-ANCHOR — SESSION 11
+# =============================================================================
+# File:     bootstrap/06_ConsensusPress_06.yaml
+# Project:  ConsensusPress by Seekrates
+# Session:  11
+# Date:     2026-03-06
+# Author:   D-C (Session 11)
+# Status:   PHPUnit gate CLOSED. Four Ills certified clean.
+#           Sprint 8 spec ready to open. Railway patch pending.
+# Previous: bootstrap/05_ConsensusPress_05.yaml (Session 09)
+#           Session 10 summary embedded in transcript (compacted).
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: SESSION IDENTITY
+# =============================================================================
+session:
+  id: 11
+  project: "ConsensusPress"
+  date: "2026-03-06"
+  title: "PHPUnit Gate Closure (cont.) + Four Ills Audit + Session Close"
+  duration: "~2 hours"
+  type: "D-C"
+  previous_reanchor: "bootstrap/05_ConsensusPress_05.yaml (Session 09)"
+  note: |
+    Session 10 work is preserved in compacted transcript.
+    Sessions 10-11 combined to close OPEN-09-01 (PHPUnit gate).
+    Session 10 diagnosed root causes. Session 11 resolved final blocker
+    (server envelope contract mismatch) and confirmed GREEN.
+
+# =============================================================================
+# SECTION 2: SESSION SUMMARY
+# =============================================================================
+session_summary: |
+  Session 11 picked up from Session 10's 4-failure state (62 tests, 1 error,
+  3 failures). Root cause diagnosed: API class returns $parsed['data'] — the
+  test fixtures passed raw engine payload but API class wraps in a server
+  envelope {success: true, data: {...}}. Fixtures needed the envelope. Fixed
+  across test-async.php, test-create.php, test-diff.php. A file size collision
+  (test-async.php deployed at wrong 14,564 bytes matching test-create.php) added
+  one extra deploy cycle. After correct deploy: 62 tests, 135 assertions, GREEN.
+
+  Subsequent work this session:
+  - Full Four Ills audit conducted against all production PHP class files.
+    Result: CERTIFIED CLEAN across all four ills + WP compliance.
+    Artefact: four_ills_guardrail_system_consensuspress.yaml v1.0.0.
+  - main.py Railway patch: instruction message composed and sent to D-C@seekrates_ai.
+    Exact 2-line patch specified. Verification sequence provided.
+    Status: awaiting Railway confirmation.
+  - files/ deletion: staged pending Railway confirmation.
+  - Closing documents produced: INDRA-CP-03, bootstrap/06, four_ills guardrail.
+
+# =============================================================================
+# SECTION 3: ACHIEVEMENTS
+# =============================================================================
+achievements:
+
+  gate_closures:
+
+    - id: "GATE-11-01"
+      description: "PHPUnit gate CLOSED — OPEN-09-01 resolved"
+      status: "CONFIRMED GREEN"
+      result: "62 tests, 135 assertions, 0 errors, 0 failures"
+      runtime: "PHP 8.5.3, PHPUnit 9.6.34, 18 seconds"
+      root_cause: |
+        API class returns $parsed['data'] not $parsed.
+        Test fixtures contained raw engine payload at top level.
+        Server envelope {success: true, data: {...}} required by API class.
+        Once fixtures wrapped in envelope — all tests green.
+      sessions_to_close: "2 (Sessions 10-11)"
+
+    - id: "GATE-11-02"
+      description: "Four Ills retroactive audit — CERTIFIED CLEAN"
+      status: "COMPLETE"
+      evidence: "All 4 production class files scanned. ILL-1,2,3,4 PASS. WP compliance PASS."
+      artefact: "docs/flow_control/four_ills_guardrail_system_consensuspress.yaml v1.0.0"
+
+  bugs_fixed:
+
+    - id: "BUG-11-01"
+      description: "test-async.php deployed at wrong file size (14,564 bytes — same as test-create.php)"
+      fix: "Re-delivered correct 9,566 byte file. PHP fatal: Cannot redeclare class resolved."
+      root_cause: "Deploy collision — wrong file saved to disk"
+
+    - id: "BUG-11-02"
+      description: "Test fixtures missing server envelope {success: true, data: {...}}"
+      files: ["test-async.php", "test-create.php", "test-diff.php"]
+      fix: "All FIXTURE_CREATE_SUCCESS and rescue fixtures wrapped in server envelope"
+      root_cause: "HAL-008 — Unverified assumption: fixture shape assumed to match API class contract without tracing query() return path"
+      lesson: |
+        API class query() returns $parsed['data'] — not $parsed.
+        All test fixtures must wrap engine payload in:
+          {'success': true, 'data': {...Sprint 7 engine shape...}}
+        This is the canonical Railway server envelope contract.
+        D-CP-11-02 locked to prevent regression.
+
+  documents_produced:
+
+    - "docs/flow_control/four_ills_guardrail_system_consensuspress.yaml v1.0.0"
+    - "indra_update_consensuspress_2026-03-06.yaml (INDRA-CP-03)"
+    - "bootstrap/06_ConsensusPress_06.yaml (this file)"
+
+# =============================================================================
+# SECTION 4: CURRENT STATUS
+# =============================================================================
+current_status:
+
+  plugin:
+    version: "2.0.0"
+    status: "STABLE — Sprint 7 complete"
+    test_gate: "GREEN — 62/62"
+    four_ills: "CERTIFIED CLEAN"
+    wp_compliance: "PASS"
+
+  railway_endpoint:
+    status: "BUILT — not yet registered in main.py"
+    file: "src/api/consensuspress_endpoints.py v1.0.0"
+    patch_required: |
+      from src.api.consensuspress_endpoints import router as consensuspress_router
+      app.include_router(consensuspress_router)
+    instruction_sent: "2026-03-06 — D-C@seekrates_ai"
+    blocker_id: "OPEN-09-03"
+
+  files_directory:
+    status: "PENDING DELETION"
+    command: "rm -rf files/"
+    dependency: "OPEN-09-03 confirmed first"
+    blocker_id: "OPEN-09-04"
+
+  ttap:
+    status: "STALE — ConsensusPress section 8+ sessions out of date"
+    action: "OPEN-TTAP-01 — rewrite required before accurate portfolio planning"
+
+# =============================================================================
+# SECTION 5: OPEN ITEMS
+# =============================================================================
+open_items:
+
+  - id: "OPEN-09-03"
+    priority: "HIGH"
+    description: "main.py 2-line Railway patch"
+    status: "INSTRUCTION SENT — awaiting D-C@seekrates_ai confirmation"
+    next_action: "Confirm Railway deploy. Test live endpoint. Close this item."
+
+  - id: "OPEN-09-04"
+    priority: "MEDIUM"
+    description: "rm -rf files/"
+    status: "PENDING — execute after OPEN-09-03 confirmed"
+    command: "cd ConsensusPress && rm -rf files/"
+
+  - id: "OPEN-11-01"
+    priority: "HIGH"
+    description: "Sprint 8 spec — D1-D7 instructions"
+    status: "READY TO OPEN — PHPUnit gate green"
+    scope: "WordPress.org packaging + Unsplash featured image"
+    prerequisite: "None — gate cleared"
+
+  - id: "OPEN-11-02"
+    priority: "LOW"
+    description: "PHP 8.5 deprecation warnings"
+    items:
+      - "float→int cast in meta-box.php line 90 — fold into Sprint 8 CCI"
+      - "ReflectionMethod::setAccessible() in test-meta-box.php — 3 occurrences"
+    next_action: "Fold into Sprint 8 first CCI as housekeeping items"
+
+  - id: "OPEN-TTAP-01"
+    priority: "HIGH"
+    description: "TTAP ConsensusPress section rewrite"
+    status: "OUTSTANDING — flagged twice (INDRA-CP-02, INDRA-CP-03)"
+    next_action: "D-C to draft rewrite before Sprint 8 spec opens, or simultaneously"
+
+# =============================================================================
+# SECTION 6: DECISIONS REGISTER
+# =============================================================================
+decisions:
+
+  D-CP-10-01:
+    decision: "AFD v1.4.0 adopted — D8 + HAL-013 + Spec Ambiguity Probe mandatory Sprint 8"
+    status: "LOCKED"
+    session: 10
+
+  D-CP-10-02:
+    decision: |
+      phpunit.xml explicit <file> entries only. No directory scan.
+      PHPUnit 9 *Test.php suffix silently skips test-*.php.
+      suffix='.php' directory scan causes class redeclaration on bootstrap.
+    status: "LOCKED — irreversible"
+    session: 10
+
+  D-CP-11-01:
+    decision: |
+      generate_faq_schema() and generate_article_schema() bare @return array
+      formally deferred TYPE-B. Consumed only by wp_json_encode(). Not structural risk.
+    status: "LOCKED"
+    session: 11
+
+  D-CP-11-02:
+    decision: |
+      All test fixtures must use server envelope: {success: true, data: {...}}.
+      API class query() returns $parsed['data'] — not $parsed.
+      This is the canonical Railway ↔ Plugin contract shape.
+    status: "LOCKED — prevents fixture regression"
+    session: 11
+
+  D-08-06:
+    decision: "All LLM intelligence server-side. Plugin thin client. ILL-3 structurally absent."
+    status: "LOCKED — architectural"
+    session: 8
+
+# =============================================================================
+# SECTION 7: SPRINT REGISTER
+# =============================================================================
+sprint_register:
+
+  sprint_1:
+    status: "COMPLETE"
+    scope: "Plugin skeleton, settings page, API client, test framework"
+    version: "1.0.0"
+    tests: 20
+
+  sprint_2:
+    status: "COMPLETE"
+    scope: "Create Mode — topic → API → WordPress draft (SEO/schema/image)"
+    version: "1.1.0"
+    tests: 29
+
+  sprint_3:
+    status: "COMPLETE"
+    scope: "Async WP-Cron, consensus meta box"
+    version: "1.2.0"
+    tests: 34
+
+  sprint_4:
+    status: "COMPLETE"
+    scope: "Rescue Mode + Diff Viewer"
+    version: "1.3.0"
+    tests: 47
+
+  sprint_5:
+    status: "COMPLETE"
+    scope: "Usage Tracking + Tier Enforcement"
+    version: "1.4.0"
+    tests: 55
+
+  sprint_7:
+    status: "COMPLETE — tests GREEN"
+    scope: |
+      Railway FastAPI endpoint (consensuspress_endpoints.py).
+      T&C gate patch (API class v1.1.0).
+      Post-Builder v2.0.0 — PHP content pipeline.
+      Mock API v2.0.0 — field names corrected.
+    version: "2.0.0"
+    tests: 62
+    note: "Railway endpoint built but not yet registered in main.py (OPEN-09-03)"
+
+  sprint_8:
+    status: "PENDING — spec not yet opened"
+    scope: |
+      WordPress.org packaging:
+        - readme.txt (WP.org format)
+        - Banner (772×250), Icon (256×256), screenshots
+        - GPL v2+ compliance audit
+        - WordPress.org SVN submission
+      Unsplash featured image fetch (B-08-01, deferred from Sprint 7)
+      PHP 8.5 deprecation housekeeping (OPEN-11-02)
+    version_target: "2.1.0"
+    tests_estimate: "70+ (packaging + Unsplash adds ~8 tests)"
+    sessions_estimate: 2
+    prerequisites: "OPEN-09-03 confirmed (Railway endpoint live)"
+
+# =============================================================================
+# SECTION 8: FILE INVENTORY — SPRINT 7 + SESSION 10-11 CHANGES
+# =============================================================================
+file_inventory:
+
+  sprint_7_delivered:
+    - "src/api/consensuspress_endpoints.py              v1.0.0 (NEW)"
+    - "plugin/consensuspress/includes/class-consensuspress-api.php          v1.1.0"
+    - "plugin/consensuspress/includes/class-consensuspress-post-builder.php v2.0.0"
+    - "plugin/consensuspress/includes/class-consensuspress-meta-box.php     v1.1.0"
+    - "docs/consensuspress_mock_api.yaml                                     v2.0.0"
+
+  session_10_11_delivered:
+    - "tests/bootstrap.php                        v1.7.0 — 13 WP function stubs added"
+    - "tests/test-async.php                       v1.2.0 — server envelope fixture fix"
+    - "tests/test-create.php                      v1.2.0 — server envelope fixture fix"
+    - "tests/test-diff.php                        v1.2.0 — server envelope fixture fix"
+    - "tests/test-meta-box.php                    v1.1.0 — assertion corrections"
+
+  pending_manual:
+    - "src/server/main.py — 2 lines (OPEN-09-03)"
+
+  to_delete:
+    - "files/ — entire staging directory (OPEN-09-04)"
+
+  new_this_session:
+    - "docs/flow_control/four_ills_guardrail_system_consensuspress.yaml v1.0.0"
+    - "bootstrap/06_ConsensusPress_06.yaml (this file)"
+    - "indra_update_consensuspress_2026-03-06.yaml"
+
+# =============================================================================
+# SECTION 9: TIMEFRAME TO COMPLETION
+# =============================================================================
+timeframe:
+
+  session_12:
+    label: "Sprint 8 Spec"
+    work: |
+      D-C writes Sprint 8 D1-D7 instructions.
+      Scope: WordPress.org packaging + Unsplash + PHP 8.5 housekeeping.
+      Prerequisite: OPEN-09-03 Railway confirmation (ideally done before session).
+      Also: TTAP ConsensusPress section rewrite (OPEN-TTAP-01).
+    output: "sprint_8_d1_d7_instructions.yaml"
+    duration_estimate: "2-3 hours"
+
+  session_13:
+    label: "Sprint 8 C-C Execution"
+    work: |
+      C-C executes Sprint 8 spec.
+      Files: readme.txt, banner.png, icon.png, Unsplash integration.
+      PHP 8.5 housekeeping folded in.
+      PHPUnit gate: 70+ tests green.
+    output: "WordPress.org ready package"
+    duration_estimate: "3-4 hours"
+
+  session_14:
+    label: "WordPress.org Submission + Smoke Test"
+    work: |
+      Manual WordPress.org plugin check tool run.
+      SVN commit to WordPress.org plugin repository.
+      Live smoke test: real API key, real topic, real draft created.
+      WarriorPlus listing setup.
+    output: "Plugin live on WordPress.org"
+    duration_estimate: "2-3 hours"
+
+  total_sessions_remaining: "2-3"
+  total_sessions_consumed: 11
+  wordpress_org_target: "Session 13-14"
+
+# =============================================================================
+# SECTION 10: METRICS
+# =============================================================================
+metrics:
+  sessions_completed: 11
+  sprints_complete: 6          # Sprints 1-5 + Sprint 7
+  tests_green: 62
+  assertions_green: 135
+  four_ills_status: "CERTIFIED CLEAN"
+  bugs_fixed_session_11: 2
+  bugs_fixed_total: "20+ across all sessions"
+  loc_delivered_total: "~3,500 (plugin + tests + Railway endpoint)"
+  blockers_open: 2             # OPEN-09-03, OPEN-09-04
+  blockers_open_blocking: 1    # OPEN-09-03 (Railway) blocks live endpoint
+
+# =============================================================================
+# SECTION 11: HYDRATION INSTRUCTIONS — NEXT SESSION
+# =============================================================================
+hydration:
+  parse_sequence:
+    - "bootstrap/06_ConsensusPress_06.yaml (this file) — Session 11"
+    - "bootstrap/05_ConsensusPress_05.yaml — Session 09 (Sprint 7 delivery)"
+    - "docs/sprint_7_D1_d7_instructions.yaml — Sprint 7 spec"
+
+  confirm_on_load:
+    - "OPEN-09-03: Has main.py been patched on Railway? Is endpoint live?"
+    - "OPEN-09-04: Has files/ been deleted?"
+    - "OPEN-TTAP-01: TTAP rewrite — do this before Sprint 8 spec or during?"
+
+  first_action_session_12: |
+    Confirm Railway endpoint status (OPEN-09-03).
+    If confirmed: execute rm -rf files/ (OPEN-09-04).
+    Then: open Sprint 8 spec OR write TTAP rewrite — Mohan to direct.
+
+  key_contract_to_preserve: |
+    API class envelope contract (D-CP-11-02):
+    All test fixtures must use: {"success": true, "data": {...engine shape...}}
+    API class query() returns $result['data'] — not $result directly.
+    Never regress this fixture shape.
+
+# =============================================================================
+# END OF SESSION 11 RE-ANCHOR
+# =============================================================================

@@ -1,0 +1,471 @@
+# =============================================================================
+# RE-ANCHOR: SESSION 01 — CONSENSUSPRESS BY SEEKRATES
+# =============================================================================
+# File: bootstrap/01_consensuspress_01.yaml
+# Template: re_anchor_template.yaml v1.0.0
+# Producer: D-C (Designer Claude) — Session 01
+# Supervisor: Mohan Iyer (founder/AI architect, Seekrates AI)
+# QC Authority: Mohan — all deliverables subject to Mohan review/approval
+# Methodology: AFD v1.3.0
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: SESSION IDENTITY
+# =============================================================================
+session:
+  id: 1
+  project: "consensuspress"
+  date: "2026-02-25"
+  title: "Project Hydration + Architecture + Mock API Specification"
+  duration: "~3 hours"
+  type: "D-C"
+  previous_reanchor: "none — Session 01 (project inception)"
+  ttap_version: "1.0.0"
+
+# =============================================================================
+# ROLES THIS SESSION (explicit per Mohan's directive)
+# =============================================================================
+roles:
+  mohan:
+    title: "Supervisor / QC Authority"
+    actions_this_session:
+      - "Provided project instructions (Three-Team Session Protocol v1.0.0)"
+      - "Provided 15 memory edits defining project context"
+      - "Uploaded src.zip (seekrates_publisher source code)"
+      - "Uploaded positioning_strategy.yaml"
+      - "Uploaded hlr_consensus_plus.yaml"
+      - "Uploaded handover_bug_105_01_deploy.yaml"
+      - "Uploaded shiftlog_test_scenarios.md + shiftlog_tests_as_sales_collateral.md"
+      - "Provided Gemini WP plugin technical analysis + Claude commentary"
+      - "Directed all tasks, approved direction, corrected errors"
+      - "Corrected D-C misunderstanding re: 'overnight backup' → post scheduling vs backup timing"
+    authority: "Accepts/rejects all D-C deliverables. C-C activation by Mohan command only."
+
+  d_c:
+    title: "Designer Claude — Architecture, Analysis, QC"
+    actions_this_session:
+      - "Parsed all project knowledge (15 files + src.zip)"
+      - "Produced HLR v1.1.0 (WordPress technical architecture)"
+      - "Produced Deploy Gates protocol (7 gates, 14 HAL markers)"
+      - "Produced Mock API Specification (10 fixtures, swap protocol)"
+      - "Produced TTAP Sprint Plan (6 sprints, 27 files, ~3,610 LOC)"
+      - "Identified 15 PHP/MySQL watchlist risks"
+      - "Produced this re-anchor"
+    authority: "All design decisions. Reviews/accepts/rejects C-C output when C-C activated."
+
+  c_c:
+    title: "Coder Claude — Implementation Only"
+    actions_this_session: "NOT activated. Session 01 was pure D-C (design/architecture)."
+    activation: "C-C activated ONLY when Mohan explicitly says 'C-C'"
+
+# =============================================================================
+# SECTION 2: SESSION SUMMARY
+# =============================================================================
+session_summary: |
+  Session 01 established the complete architectural foundation for ConsensusPress.
+  D-C parsed all uploaded project knowledge (15 files + 11 Python source files from
+  seekrates_publisher), produced three major design documents (HLR v1.1.0, Deploy
+  Gates, Mock API Spec), defined the 6-sprint build plan, and identified 15
+  PHP/WordPress-specific risks. No code was written — this was pure D-C design
+  work. The mock API specification is the critical output: it defines the exact
+  JSON contract between plugin and server, preventing the Session 37 failure mode
+  (semantic contract mismatch) before any code exists.
+
+# =============================================================================
+# SECTION 3: ACHIEVEMENTS
+# =============================================================================
+achievements:
+
+  docs_created:
+    - id: "DOC-01-01"
+      description: "HLR v1.1.0 — WordPress Plugin Technical Architecture"
+      status: "COMPLETE"
+      detail: |
+        Added 10 subsections to HLR: hook system, lifecycle hooks, persistence
+        (Options/Meta/Custom Table/Transients), security quartet, assets/enqueueing,
+        autoloading (PSR-4 adapted), custom REST endpoints, WP-Cron considerations,
+        Settings API, update mechanism. 874 lines. YAML validated.
+      files: ["hlr_consensus_plus_v1.1.0.yaml"]
+      author: "D-C"
+      reviewer: "Mohan (pending)"
+
+    - id: "DOC-01-02"
+      description: "Deployment Gate Protocol v1.0.0"
+      status: "COMPLETE"
+      detail: |
+        7 gates, 30 checks, 14 hallucination markers (HAL-001→008 core +
+        HAL-WP-001→006 WordPress-specific). Adapted from Seekrates three-gate
+        protocol (handover_bug_105_01_deploy.yaml). 608 lines. YAML validated.
+      files: ["consensuspress_deploy_gates.yaml"]
+      author: "D-C"
+      reviewer: "Mohan (pending)"
+
+    - id: "DOC-01-03"
+      description: "Mock API Specification v1.0.0"
+      status: "COMPLETE"
+      detail: |
+        10 deterministic fixtures covering: create success, rescue success,
+        partial refusal (BUG-105-01 scenario), all-refusal, auth failure,
+        usage exceeded, timeout, server error, rate limited, bad request.
+        Transport interface for dependency injection. Mock→live swap protocol.
+        Semantic vocabulary (6 terms). 887 lines. YAML validated.
+      files: ["consensuspress_mock_api.yaml"]
+      author: "D-C"
+      reviewer: "Mohan (pending)"
+
+  analysis_completed:
+    - id: "ANA-01-01"
+      description: "TTAP Sprint Plan — 6 sprints mapped from HLR build sequence"
+      status: "COMPLETE"
+      detail: |
+        Sprint 1: Foundation (skeleton + API client, ~890 LOC, 2 test files)
+        Sprint 2: Create Mode (topic → draft, ~980 LOC, 4 test files)
+        Sprint 3: Async + Meta Box (~620 LOC, 2 test files)
+        Sprint 4: Rescue + Diff (~670 LOC, 2 test files)
+        Sprint 5: Usage Tracking + Tiers (~250 LOC, 1 test file)
+        Sprint 6: WordPress.org Packaging (~200 LOC, 0 test files)
+        Total: 27 files, ~3,610 LOC, 11 test files
+      files: []
+      author: "D-C"
+      reviewer: "Mohan (pending — in chat only, not yet a standalone document)"
+
+    - id: "ANA-01-02"
+      description: "PHP/MySQL Watchlist — 15 risks identified for first PHP project"
+      status: "COMPLETE"
+      detail: |
+        Typing (PHP 7.4 baseline constraints), WordPress global state,
+        hook execution order, 30-60s timeout problem, dbDelta() quirks,
+        media sideloading requires, Rank Math graceful degradation,
+        Gutenberg vs Classic Editor, nonce lifetime during long queries,
+        AJAX vs REST API decision needed, MySQL charset, WPCS formatting,
+        testing infrastructure (WP_UnitTestCase), no live API for testing,
+        post scheduling vs backup timing (Mohan's requirement).
+      files: []
+      author: "D-C"
+      reviewer: "Mohan (acknowledged in chat)"
+
+  infrastructure:
+    - id: "INF-01-01"
+      description: "Memory edits — 15 items stored for cross-session persistence"
+      status: "COMPLETE"
+      detail: "Mohan identity, product context, pricing, positioning, methodology, quality standards"
+      author: "D-C (on Mohan's instruction)"
+
+    - id: "INF-01-02"
+      description: "Parsed seekrates_publisher source code (11 Python files)"
+      status: "COMPLETE"
+      detail: |
+        Extracted: ParsedConsensus (22 fields), BlogPostContent (14 fields),
+        ProviderResponse (6 fields), SEOOptimizer patterns (FAQ schema, meta
+        description generation), wp_publisher (REST API integration).
+        This is the reference implementation the plugin's PHP classes derive from.
+      author: "D-C"
+
+# =============================================================================
+# SECTION 4: CURRENT STATUS
+# =============================================================================
+current_status:
+
+  plugin_design:
+    status: "IN_PROGRESS"
+    detail: "Architecture complete. D1-D7 for Sprint 1 NOT yet produced."
+    version: "pre-0.1.0"
+
+  server_endpoint:
+    status: "BLOCKED"
+    detail: "POST /api/v1/consensus does not exist. Mock API spec created as interim."
+    version: "n/a"
+
+  bug_105_01_deploy:
+    status: "PENDING"
+    detail: |
+      Consensus engine v5.1.0 (champion selection fix) is code-complete,
+      6/6 sandbox tests pass, but NOT deployed to Railway. Production
+      is still running v5.0.0 with broken champion selection.
+      This must deploy before ConsensusPress integration testing.
+    version: "5.1.0 (local) / 5.0.0 (production)"
+
+  documentation:
+    status: "STABLE"
+    detail: "HLR v1.1.0 + Deploy Gates + Mock API Spec delivered. Mohan review pending."
+
+  afd_methodology:
+    status: "STABLE"
+    detail: "AFD v1.3.0 parsed and internalized. Adapted for PHP/WordPress."
+    version: "1.3.0"
+
+# =============================================================================
+# SECTION 5: BLOCKERS
+# =============================================================================
+blockers:
+
+  active:
+    - id: "B-01-01"
+      description: "No live API endpoint — POST /api/v1/consensus does not exist"
+      blocking: "Integration testing (Sprints 1-5 use mocks, integration sprint needs live)"
+      owner: "D-C@ship_seekrates (server-side work, separate project)"
+      since: "2026-02-25"
+
+    - id: "B-01-02"
+      description: "BUG-105-01 not deployed — consensus engine v5.0.0 in production"
+      blocking: "Live API will produce incorrect champion selection until v5.1.0 deploys"
+      owner: "Mohan (deployment requires Railway access)"
+      since: "2026-02-23"
+
+    - id: "B-01-03"
+      description: "Rank Math meta key verification needed"
+      blocking: "D-C must confirm current Rank Math meta keys before specifying D1 for Sprint 2"
+      owner: "D-C (web search to verify meta keys)"
+      since: "2026-02-25"
+
+  cleared: []
+
+# =============================================================================
+# SECTION 6: DECISIONS
+# =============================================================================
+decisions:
+
+  - id: "D-01-01"
+    decision: "Plugin uses mock API responses for all testing in Sprints 1-5"
+    rationale: "Live endpoint doesn't exist yet. Mock IS the contract — endpoint must match it."
+    reversible: false
+    author: "D-C"
+    approved_by: "Mohan (implicit — no objection raised)"
+
+  - id: "D-01-02"
+    decision: "API client uses constructor injection for transport layer (mock/live swap)"
+    rationale: "ConsensusPress_Transport_Interface allows swapping wp_remote_post for mock in tests without code changes"
+    reversible: false
+    author: "D-C"
+    approved_by: "Mohan (implicit)"
+
+  - id: "D-01-03"
+    decision: "14 hallucination markers (8 core + 6 WordPress-specific)"
+    rationale: "WordPress.org reviewers check HAL-WP-001→003 (sanitize, escape, nonce). AI-generated PHP hallucinates these at high rate."
+    reversible: false
+    author: "D-C"
+    approved_by: "Mohan (implicit)"
+
+  - id: "D-01-04"
+    decision: "6-sprint build plan: Foundation → Create → Async → Rescue → Usage → Packaging"
+    rationale: "Dependency order from HLR build sequence. MVP after Sprint 3 (Create mode working)."
+    reversible: true
+    author: "D-C"
+    approved_by: "Mohan (pending formal review)"
+
+  - id: "D-01-05"
+    decision: "PHP 7.4 baseline — no union types, no enums, no typed class constants"
+    rationale: "HLR requires PHP 7.4 minimum for WordPress.org compatibility. Constrains D1 type declarations."
+    reversible: true
+    author: "D-C"
+    approved_by: "Mohan (implicit — set in HLR)"
+
+  - id: "D-01-06"
+    decision: "Post scheduling must not clash with WordPress daily backup processes"
+    rationale: "Mohan requirement: draft posts created at e.g. 12:01pm must not interfere with site backup cron"
+    reversible: true
+    author: "Mohan (requirement)"
+    detail: |
+      ConsensusPress creates drafts, not published posts. Drafts should
+      not trigger backup-intensive operations. However, if the plugin uses
+      wp_insert_post() during a running backup, database locks could cause
+      timeouts. D-C must consider: (a) document recommended backup scheduling
+      in readme.txt, (b) consider wp_schedule_single_event() to defer
+      draft creation to a non-backup window, (c) at minimum, don't auto-publish.
+
+  - id: "D-01-07"
+    decision: "Gemini + Claude WP plugin technical analysis incorporated into HLR v1.1.0"
+    rationale: "10 subsections added: hooks, lifecycle, persistence, security, assets, autoloading, REST, WP-Cron, Settings API, update mechanism"
+    reversible: false
+    author: "D-C (synthesis of Gemini analysis + Claude commentary)"
+    approved_by: "Mohan (directed the incorporation)"
+
+# =============================================================================
+# SECTION 7: NEXT STEPS
+# =============================================================================
+next_steps:
+
+  p0_immediate:
+    - task: "Produce D1-D7 for Sprint 1 (Foundation: plugin skeleton + API client + settings)"
+      project: "CP"
+      note: |
+        D1: Typed PHP class signatures (ConsensusPress_API, ConsensusPress_Settings,
+            ConsensusPress_Transport_Interface, activation/deactivation functions)
+        D2: Verification matrix (contracts between all Sprint 1 files)
+        D3: API contracts (wp_remote_post to Seekrates, Settings API registration)
+        D4: Test scenarios for test-api-client.php and test-settings.php
+        D5: Directory map (exact file paths)
+        D6: Import specification (require_once statements, use declarations, hook registrations with priorities)
+        D7: Test infrastructure (PHPUnit setup, mock transport, WP function stubs)
+      author: "D-C (next session)"
+      reviewer: "Mohan (approves before C-C activation)"
+
+    - task: "Mohan to review 3 deliverables from Session 01"
+      project: "CP"
+      note: |
+        1. hlr_consensus_plus_v1.1.0.yaml — verify WP technical architecture is complete
+        2. consensuspress_deploy_gates.yaml — verify gate sequence is practical
+        3. consensuspress_mock_api.yaml — verify API contract matches engine intent
+      author: "Mohan"
+
+  p1_this_week:
+    - task: "Deploy BUG-105-01 fix (consensus_engine v5.0.0 → v5.1.0) to Railway"
+      project: "SEEK"
+      note: "Blocker B-01-02. Code complete, 6/6 tests pass. Needs three-gate deploy."
+      author: "Mohan (Railway access required)"
+
+    - task: "Verify Rank Math meta key names against current Rank Math source"
+      project: "CP"
+      note: "Blocker B-01-03. D-C web searches to confirm rank_math_focus_keyword etc. still current."
+      author: "D-C"
+
+    - task: "Formalise TTAP Sprint Plan as standalone YAML document"
+      project: "CP"
+      note: "Currently in chat only. Needs to be a file in project knowledge for persistence."
+      author: "D-C"
+
+  p2_backlog:
+    - task: "Build POST /api/v1/consensus endpoint on Railway (HLR Step 1)"
+      project: "SEEK"
+      note: "Blocker B-01-01. Thin wrapper around consensus_engine.py. JSON req/resp instead of web form + email."
+
+    - task: "Investigate wp_schedule_single_event() for deferred draft creation"
+      project: "CP"
+      note: "Decision D-01-06. Prevents backup timing conflicts. May also solve the 30-60s timeout problem."
+
+    - task: "Set up local WordPress test environment (WP 6.7 + PHP 7.4)"
+      project: "CP"
+      note: "Required for Sprint 1 smoke testing. Consider wp-env, Local, or Docker."
+
+# =============================================================================
+# SECTION 8: KEY INSIGHTS
+# =============================================================================
+key_insights:
+
+  - insight: "The mock IS the contract, not a testing convenience"
+    lesson: |
+      When the live endpoint is built, it must match the mock fixtures.
+      If it diverges, fix the endpoint, not the tests. This inverts the
+      usual pattern where tests conform to implementation. Here, the
+      specification (mock) was defined first, and both plugin AND endpoint
+      must conform to it. Session 37 would not have happened if the
+      posting_calendar had been validated against the consumer's expectations.
+
+  - insight: "WordPress HAL markers are distinct from Python HAL markers"
+    lesson: |
+      AI-generated PHP hallucinates different patterns than Python.
+      The top 3 WordPress hallucinations: unsanitised $_POST (HAL-WP-001),
+      unescaped echo $var (HAL-WP-002), and missing nonces (HAL-WP-003).
+      These are the exact things WordPress.org reviewers catch. Adding
+      6 WP-specific markers to the existing 8 core markers gives us 14
+      automated checks that prevent the most common AI-generated PHP bugs.
+
+  - insight: "Post scheduling vs backup timing is a real production concern"
+    lesson: |
+      Mohan flagged that draft creation timing must not clash with daily
+      WordPress backup processes. This is not theoretical — wp_insert_post()
+      during a running backup can cause database locks and timeouts. The
+      solution space includes: deferred creation via WP-Cron, backup-aware
+      scheduling, or simply documenting recommended backup windows in readme.txt.
+      This also connects to the 30-60s timeout problem — wp_schedule_single_event()
+      might solve both issues simultaneously.
+
+  - insight: "First PHP project under AFD requires explicit language adaptation"
+    lesson: |
+      AFD was designed for Python (Pydantic, pytest, Dict[str,Any] scans).
+      For PHP: D1 becomes typed class signatures with PHPDoc, D4 becomes
+      PHPUnit, D6 specifies hook registrations and priorities (design decisions
+      that C-C must not make), HAL-001 scans for untyped params instead of
+      Dict[str,Any]. The principles are language-agnostic but every concrete
+      check needs adaptation. 15 PHP-specific risks identified this session.
+
+# =============================================================================
+# SECTION 9: SESSION METRICS
+# =============================================================================
+session_metrics:
+  duration: "~3 hours"
+  bugs_fixed: 0
+  features_delivered: 0
+  decisions_made: 7
+  files_created: 3
+  files_modified: 0
+  docs_updated: 1  # HLR v1.0.0 → v1.1.0
+  blockers_cleared: 0
+  blockers_remaining: 3
+
+# =============================================================================
+# SECTION 10: TTAP UPDATE
+# =============================================================================
+ttap_update:
+  previous_version: "n/a"
+  new_version: "1.0.0"
+  mods_delivered: "n/a — TTAP sprint plan defined in chat, not yet formalised"
+  sections_affected: ["Sprint 1-6 scope defined"]
+
+# =============================================================================
+# SECTION 11: CROSS-REFERENCES
+# =============================================================================
+cross_references:
+  previous_session: "none — Session 01"
+  ttap: "TTAP Sprint Plan v1.0.0 (in chat, pending formalisation)"
+  files_created:
+    - "hlr_consensus_plus_v1.1.0.yaml (874 lines)"
+    - "consensuspress_deploy_gates.yaml (608 lines)"
+    - "consensuspress_mock_api.yaml (887 lines)"
+  files_modified: []
+  related_docs:
+    - "afd_overview.yaml v1.3.0"
+    - "afd_workflow.yaml v1.3.0"
+    - "afd_success_criteria.yaml v1.3.0"
+    - "hlr_consensus_plus.yaml v1.0.0 (original)"
+    - "handover_bug_105_01_deploy.yaml"
+    - "positioning_strategy.yaml"
+    - "seekrates_publisher_compact_sysdocs.yaml v2.0.0"
+    - "seekrates_publisher_dna_registry.yaml"
+    - "hlr_seekrates_publisher.yaml v2.3.0"
+    - "shiftlog_test_scenarios.md"
+    - "shiftlog_tests_as_sales_collateral.md"
+    - "src.zip (seekrates_publisher source, 11 Python files)"
+
+# =============================================================================
+# SECTION 12: HYDRATION INSTRUCTIONS
+# =============================================================================
+hydration:
+
+  on_next_session:
+    - "Parse this file (bootstrap/01_consensuspress_01.yaml)"
+    - "Parse AFD docs: afd_overview.yaml, afd_workflow.yaml, afd_success_criteria.yaml"
+    - "Parse HLR: hlr_consensus_plus.yaml (check if Mohan uploaded v1.1.0 to project knowledge)"
+    - "Parse Mock API: consensuspress_mock_api.yaml (if uploaded to project knowledge)"
+    - "Parse Deploy Gates: consensuspress_deploy_gates.yaml (if uploaded to project knowledge)"
+    - "Check blocker B-01-02: has BUG-105-01 been deployed to Railway?"
+    - "Check blocker B-01-03: verify Rank Math meta keys via web search"
+    - "Signal: '✅ HYDRATED | Session 02 | ConsensusPress | [status]'"
+
+  key_files:
+    - "bootstrap/01_consensuspress_01.yaml (this file)"
+    - "hlr_consensus_plus_v1.1.0.yaml"
+    - "consensuspress_deploy_gates.yaml"
+    - "consensuspress_mock_api.yaml"
+    - "afd_overview.yaml, afd_workflow.yaml, afd_success_criteria.yaml"
+
+  open_questions:
+    - "Mohan: confirm HLR v1.1.0 approved or changes needed?"
+    - "Mohan: confirm Mock API contract matches engine intent?"
+    - "Mohan: confirm Deploy Gates are practical for your workflow?"
+    - "Mohan: preferred local WP test environment? (wp-env, Local, Docker, MAMP?)"
+    - "Mohan: AJAX vs REST API — D-C recommends REST for main ops, AJAX for polling. Agree?"
+
+# =============================================================================
+# SECTION 13: VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-25"
+    author: "D-C (Session 01)"
+    reviewer: "Mohan (pending)"
+    changes: "Initial re-anchor creation — project inception session"
+
+# =============================================================================
+# END OF RE-ANCHOR
+# =============================================================================

@@ -1,0 +1,919 @@
+# =============================================================================
+# CONSENSUSPRESS PROJECT PLAN v1.0.0
+# =============================================================================
+# file:      plans/ConsensusPress_project_plan.yaml
+# purpose:   Complete implementation plan — tooling, sprints, Four Ills, gates
+# author:    D-C (Session 02)
+# date:      2026-02-28
+# supervisor: Mohan Iyer (founder/AI architect, Seekrates AI)
+# status:    DRAFT — awaiting Mohan approval
+# =============================================================================
+
+# =============================================================================
+# SECTION 1: EXECUTIVE SUMMARY
+# =============================================================================
+summary:
+
+  project: "ConsensusPress by Seekrates"
+  product: "WordPress plugin — thin API client to Seekrates AI consensus engine"
+  architecture: "All LLM intelligence on Railway server. Plugin = WP delivery + UI."
+  methodology: "AFD v1.3.0 + Three-Team Session Protocol v1.0.0"
+  language: "PHP 7.4+ (plugin) + Python 3.11 (methodology tooling)"
+
+  current_state:
+    sessions_completed: 2
+    sprint_1: "COMPLETE — 15 files, 1,892 LOC, 16 tests, 55 assertions, all passing"
+    four_ills_status: "NOT ADDRESSED — tooling does not exist for PHP"
+    blockers: 3   # B-01-02 Railway deploy, open questions on WP env + AJAX/REST
+
+  total_estimated:
+    sprints: 8              # 6 feature + 1 tooling + 1 Four Ills purge
+    sessions: "10-14"
+    loc_plugin: "~3,610"
+    loc_tooling: "~1,200"
+    test_scenarios: "~60"
+    calendar_weeks: "4-6 at 2-3 sessions/week"
+
+  critical_path: |
+    Phase 0 (Tooling)  →  Phase 0.5 (Four Ills Baseline)  →
+    Sprint 2 (Create)  →  Sprint 3 (Async + Meta Box)  →  MVP
+    Sprint 4 (Rescue)  →  Sprint 5 (Usage)  →  Sprint 6 (Packaging)
+
+  philosophy: |
+    "Until all 4 ills are eliminated from the app code the app is junk,
+     AFD is a bubble." — Mohan, 2026-02-28
+
+    The tooling sprint (Phase 0) is not overhead. It is the foundation
+    that makes every subsequent sprint provably correct rather than
+    plausibly correct. Without it, we are building on faith.
+
+# =============================================================================
+# SECTION 2: PHP METHODOLOGY TOOLING (Phase 0 — NEW)
+# =============================================================================
+# These tools do not exist. They must be built BEFORE feature sprints resume.
+# All tools are REUSABLE across future WordPress plugins.
+# =============================================================================
+phase_0_tooling:
+
+  principle: |
+    The Python AFD toolchain (hal001_scanner.py, inventory_file.py,
+    diff_inventories.py, spec_lint.py) cannot parse PHP. PHP has no
+    Pydantic, no TypedDict, no ast module for PHP parsing.
+
+    We need PHP-native equivalents that enforce the same Four Ills
+    defences using PHP's available type system (PHPDoc, type hints,
+    static analysis). These are standalone CLI tools that run on
+    Mohan's machine — NOT part of the WordPress plugin.
+
+    Design constraint: reusable across ALL future PHP/WordPress projects.
+    Install once in a shared tools/ directory. Run against any plugin.
+
+  tooling_location:
+    canonical: "~/tools/php-afd/"
+    symlink_into_projects: "ln -s ~/tools/php-afd consensuspress/tools"
+    note: "Same pattern as decision_referee_clean/tools/ for Python projects"
+
+  # ---------------------------------------------------------------------------
+  # TOOL 1: hal001_php_scanner.php — ILL-1 DETECTION
+  # ---------------------------------------------------------------------------
+  tool_1_hal001_scanner:
+    file: "tools/php-afd/hal001_php_scanner.php"
+    ill: "ILL-1 (Type Erasure)"
+    reusable: true
+    estimated_loc: 250
+    language: "PHP"
+
+    purpose: |
+      Scans PHP source files for type erasure violations — the PHP
+      equivalents of Python's Dict[str, Any].
+
+    what_it_detects:
+      # PHP type erasure patterns (see hallucination_seeds_php.yaml)
+      - pattern: "array without PHPDoc @return/@param shape"
+        description: "Function returns 'array' with no @return array{key: type} annotation"
+        severity: "HIGH"
+        grep_preview: 'grep -rn "): array" src/ | grep -v "@return array{"'
+      - pattern: "mixed type hint"
+        description: "Using 'mixed' as parameter or return type"
+        severity: "HIGH"
+        grep_preview: 'grep -rn ": mixed" src/'
+      - pattern: "Untyped function parameters"
+        description: "Function parameter with no type hint and no @param annotation"
+        severity: "MEDIUM"
+      - pattern: "json_decode without shape assertion"
+        description: "json_decode() result used without key validation"
+        severity: "HIGH"
+      - pattern: "Bare array access on API response"
+        description: "$response['key'] without isset() or array_key_exists()"
+        severity: "HIGH"
+
+    detection_method: |
+      Two-pass approach:
+      Pass 1 (token-based): PHP's token_get_all() tokeniser.
+        Parses function signatures, return types, parameter types.
+        Faster than regex. Handles multi-line signatures correctly.
+        Detects: ): array, : mixed, untyped params.
+      Pass 2 (pattern-based): Targeted regex on function bodies.
+        Detects: json_decode without validation, bare array access,
+        $response['key'] without isset().
+
+      Does NOT use nikic/PHP-Parser (external dependency).
+      Uses ONLY built-in PHP tokeniser — zero dependencies.
+
+    cli_interface:
+      usage: "php tools/php-afd/hal001_php_scanner.php <directory_or_file>"
+      exit_codes:
+        0: "No violations (or all suppressed)"
+        1: "Violations found"
+      output_format: |
+        FILE: includes/class-consensuspress-api.php
+          L147  HAL-001  ): array  query() returns untyped array
+          L198  HAL-001  ): array  test_connection() returns untyped array
+        ---------------------------------------------------------
+        TOTAL: 2 violations in 1 file
+        EXIT: 1
+
+    suppression_mechanism: |
+      Inline comment: // @hal001-suppress REASON
+      Example: // @hal001-suppress External WP function returns mixed
+      Suppressed lines reported but do not trigger exit 1.
+
+  # ---------------------------------------------------------------------------
+  # TOOL 2: inventory_php.php — ILL-4 PREVENTION
+  # ---------------------------------------------------------------------------
+  tool_2_inventory_php:
+    file: "tools/php-afd/inventory_php.php"
+    ill: "ILL-4 (Silent Omission)"
+    reusable: true
+    estimated_loc: 200
+    language: "PHP"
+
+    purpose: |
+      Machine-generates function/method inventory for a PHP file.
+      Output is YAML suitable for pasting into CCI D0 section.
+      Prevents manual enumeration (which LLMs get wrong).
+
+    what_it_inventories:
+      - "Functions (function keyword)"
+      - "Class methods (public/protected/private)"
+      - "Interface methods"
+      - "Line numbers"
+      - "Visibility (public/protected/private/global)"
+      - "Signature hash (first 8 chars of SHA256 of signature string)"
+
+    detection_method: |
+      PHP token_get_all() tokeniser.
+      Walks token stream for T_FUNCTION tokens.
+      Extracts: name, line, visibility, parameter list, return type.
+      Generates SHA256 of normalised signature for change detection.
+
+    cli_interface:
+      usage: "php tools/php-afd/inventory_php.php <file.php>"
+      output: "YAML to stdout — pipe to file or paste into CCI"
+      output_format: |
+        # inventory_php.php output for class-consensuspress-api.php
+        source_file: "includes/class-consensuspress-api.php"
+        inventory_date: "2026-02-28"
+        inventory_sha256: "a78f5..."
+        function_count: 5
+        functions:
+          - name: "post"
+            line: 55
+            kind: "method"
+            visibility: "public"
+            class: "ConsensusPress_WP_Transport"
+            signature_hash: "79fdb77d"
+            must_preserve: true
+
+  # ---------------------------------------------------------------------------
+  # TOOL 3: diff_inventories_php.php — ILL-4 ENFORCEMENT
+  # ---------------------------------------------------------------------------
+  tool_3_diff_inventories:
+    file: "tools/php-afd/diff_inventories_php.php"
+    ill: "ILL-4 (Silent Omission)"
+    reusable: true
+    estimated_loc: 150
+    language: "PHP"
+
+    purpose: |
+      Compares D0 preservation contract (from CCI YAML) against delivered
+      PHP file's actual function inventory. Reports missing functions.
+      D-C QC Gate 3 Step 2 — machine-enforced.
+
+    cli_interface:
+      usage: "php tools/php-afd/diff_inventories_php.php --cci CCI.yaml --output file.php"
+      exit_codes:
+        0: "All must_preserve functions present in output"
+        1: "One or more functions missing — delivery rejected"
+
+    depends_on: "inventory_php.php (reuses inventory logic)"
+
+  # ---------------------------------------------------------------------------
+  # TOOL 4: spec_lint_php.php — ALL ILLS GATE
+  # ---------------------------------------------------------------------------
+  tool_4_spec_lint:
+    file: "tools/php-afd/spec_lint_php.php"
+    ill: "ALL (ILL-1 through ILL-4)"
+    reusable: true
+    estimated_loc: 300
+    language: "PHP (parses YAML CCIs)"
+
+    purpose: |
+      Validates CCI YAML before D-C hands it to C-C.
+      Equivalent of Python's spec_lint.py — adapted for PHP CCIs.
+
+    what_it_checks:
+      - section: "D0"
+        check: "Preservation contract present and machine-sourced"
+        ill: "ILL-4"
+      - section: "D1"
+        check: "All array boundaries documented with PHPDoc shapes or DEFERRED"
+        ill: "ILL-1"
+      - section: "D2"
+        check: "balance_check is BALANCED, not PENDING"
+        ill: "ILL-2"
+      - section: "D3"
+        check: "Format contracts present when external_api_calls: true"
+        ill: "ILL-3"
+      - section: "Identity"
+        check: "instruction_id, session, template_version present"
+        ill: "Process"
+      - section: "D4"
+        check: "Test scenarios listed with IDs"
+        ill: "Process"
+
+    cli_interface:
+      usage: "php tools/php-afd/spec_lint_php.php path/to/CCI.yaml"
+      exit_codes:
+        0: "PASS — CCI may be issued to C-C"
+        1: "FAIL — return to D-C for correction"
+
+    dependency: "Requires a YAML parser — symfony/yaml (composer) or built-in yaml_parse"
+
+  # ---------------------------------------------------------------------------
+  # TOOL 5: wp_compliance_scanner.php — WORDPRESS-SPECIFIC
+  # ---------------------------------------------------------------------------
+  tool_5_wp_compliance:
+    file: "tools/php-afd/wp_compliance_scanner.php"
+    ill: "WordPress.org submission gate"
+    reusable: true
+    estimated_loc: 200
+    language: "PHP"
+
+    purpose: |
+      Scans PHP files for WordPress.org compliance violations.
+      These are the patterns WordPress.org reviewers check and reject on.
+      Running this before submission saves weeks of review ping-pong.
+
+    what_it_detects:
+      - id: "HAL-WP-001"
+        name: "Missing input sanitization"
+        pattern: "$_POST, $_GET, $_REQUEST without sanitize_*"
+        severity: "CRITICAL"
+      - id: "HAL-WP-002"
+        name: "Missing output escaping"
+        pattern: "echo/print without esc_html/esc_attr/esc_url"
+        severity: "CRITICAL"
+      - id: "HAL-WP-003"
+        name: "Missing nonce verification"
+        pattern: "wp_ajax_ handler without check_ajax_referer/wp_verify_nonce"
+        severity: "CRITICAL"
+      - id: "HAL-WP-004"
+        name: "Missing capability check"
+        pattern: "admin action without current_user_can()"
+        severity: "HIGH"
+      - id: "HAL-WP-005"
+        name: "Inline JS/CSS"
+        pattern: "<script>/<style> tags in PHP templates"
+        severity: "MEDIUM"
+      - id: "HAL-WP-006"
+        name: "Direct file access"
+        pattern: "PHP file without ABSPATH check"
+        severity: "HIGH"
+      - id: "HAL-WP-007"
+        name: "Hardcoded paths/URLs"
+        pattern: "Absolute paths instead of plugin_dir_path() etc."
+        severity: "MEDIUM"
+      - id: "HAL-WP-008"
+        name: "Direct database queries"
+        pattern: "$wpdb->query() without prepare()"
+        severity: "CRITICAL"
+
+    cli_interface:
+      usage: "php tools/php-afd/wp_compliance_scanner.php <directory>"
+      exit_codes:
+        0: "No violations"
+        1: "Violations found"
+
+  # ---------------------------------------------------------------------------
+  # TOOL 6: validate_all_php.sh — MASTER GATE
+  # ---------------------------------------------------------------------------
+  tool_6_validate_all:
+    file: "tools/php-afd/validate_all_php.sh"
+    ill: "ALL"
+    reusable: true
+    estimated_loc: 80
+    language: "Bash"
+
+    purpose: |
+      Runs ALL scanners in sequence. Single command, single pass/fail.
+      This is what C-C runs before delivery. This is what D-C runs at QC.
+
+    sequence:
+      - step: 1
+        tool: "hal001_php_scanner.php"
+        gate: "exit 0 required"
+      - step: 2
+        tool: "wp_compliance_scanner.php"
+        gate: "exit 0 required"
+      - step: 3
+        tool: "phpunit"
+        gate: "all tests pass"
+      - step: 4
+        tool: "php -l (syntax check)"
+        gate: "no parse errors"
+
+    cli_interface:
+      usage: "bash tools/php-afd/validate_all_php.sh <plugin_directory>"
+      exit_codes:
+        0: "ALL gates passed"
+        1: "One or more gates failed — report shows which"
+
+  # ---------------------------------------------------------------------------
+  # TOOLING SUMMARY
+  # ---------------------------------------------------------------------------
+  tooling_summary:
+    total_tools: 6
+    total_estimated_loc: "~1,180"
+    language: "PHP (5) + Bash (1)"
+    external_dependencies: "symfony/yaml OR ext-yaml for YAML parsing in spec_lint"
+    session_estimate: "1-2 sessions (D-C design + C-C implementation)"
+    reusable_across: "All future WordPress/PHP plugins"
+
+    build_order:
+      - tool: "hal001_php_scanner.php"
+        reason: "ILL-1 is most prevalent. Scanner output drives everything else."
+        priority: "P0"
+      - tool: "inventory_php.php"
+        reason: "Required for D0 preservation contracts in all CCIs."
+        priority: "P0"
+      - tool: "wp_compliance_scanner.php"
+        reason: "WordPress-specific. Catches submission blockers early."
+        priority: "P0"
+      - tool: "diff_inventories_php.php"
+        reason: "Required for D-C QC Gate 3 Step 2."
+        priority: "P1"
+      - tool: "spec_lint_php.php"
+        reason: "CCI validation. Can be deferred until first CCI issued."
+        priority: "P1"
+      - tool: "validate_all_php.sh"
+        reason: "Orchestrator. Build after individual tools exist."
+        priority: "P2"
+
+# =============================================================================
+# SECTION 3: FOUR ILLS BASELINE (Phase 0.5)
+# =============================================================================
+phase_0_5_four_ills_baseline:
+
+  trigger: "Phase 0 tooling complete (hal001_php_scanner + inventory_php exist)"
+  session_estimate: "0.5 sessions (runs during same session as tooling delivery)"
+
+  procedure:
+    step_1:
+      action: "Run hal001_php_scanner.php against Sprint 1 codebase"
+      command: "php tools/php-afd/hal001_php_scanner.php consensuspress/"
+      expected: |
+        Sprint 1 has known ILL-1 violations:
+        - query() returns array (untyped inner structure)
+        - test_connection() returns array (untyped)
+        - get_usage() returns array (untyped)
+        - consensuspress_activate() sets options without shape contract
+        Scanner will quantify the exact count.
+
+    step_2:
+      action: "Run wp_compliance_scanner.php against Sprint 1 codebase"
+      command: "php tools/php-afd/wp_compliance_scanner.php consensuspress/"
+      expected: "Sprint 1 was manually verified — scanner should confirm 0 violations"
+
+    step_3:
+      action: "Run inventory_php.php on each production file"
+      command: |
+        php tools/php-afd/inventory_php.php consensuspress/consensuspress.php
+        php tools/php-afd/inventory_php.php consensuspress/includes/class-consensuspress-api.php
+        php tools/php-afd/inventory_php.php consensuspress/includes/class-consensuspress-settings.php
+      output: "Machine-generated D0 inventories for each file"
+
+    step_4:
+      action: "Produce baseline document"
+      file: "bootstrap/consensuspress_hal001_baseline_cp01.yaml"
+      content: |
+        Records: total violations, file list, classification (REAL/FALSE_POSITIVE),
+        fix plan (IN-SPRINT vs DEFERRED with TYPE-A/B/C).
+
+    step_5:
+      action: "Fix ILL-1 violations in Sprint 1 files"
+      method: |
+        Add PHPDoc @return array{success: bool, data: array|null, ...} annotations.
+        Add runtime key validation functions for API response consumption.
+        Issue as CCI-CP-03-01 (first ConsensusPress CCI under Four Ills protocol).
+
+  outcome: |
+    After Phase 0.5: ConsensusPress Sprint 1 is Four Ills compliant.
+    Baseline established. All future sprints operate under full CCI protocol.
+
+# =============================================================================
+# SECTION 4: SPRINT PLAN (Feature Development)
+# =============================================================================
+sprint_plan:
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 1: Foundation — COMPLETE
+  # ---------------------------------------------------------------------------
+  sprint_1:
+    name: "Foundation — Plugin Skeleton + API Client + Settings"
+    status: "COMPLETE"
+    session: "02"
+    files_delivered: 15
+    loc_delivered: 1892
+    tests: 16
+    assertions: 55
+    hal_scan: "Manual — 8/8 clear"
+    wp_compliance: "Manual — verified"
+    four_ills: "NOT YET APPLIED — baseline pending"
+
+    files:
+      - "consensuspress.php (194 LOC)"
+      - "includes/class-consensuspress-api.php (244 LOC)"
+      - "includes/class-consensuspress-settings.php (294 LOC)"
+      - "admin/views/settings.php (48 LOC)"
+      - "admin/css/consensuspress-admin.css (38 LOC)"
+      - "admin/js/consensuspress-admin.js (44 LOC)"
+      - "uninstall.php (44 LOC)"
+      - "readme.txt (92 LOC)"
+      - "tests/bootstrap.php (211 LOC)"
+      - "tests/class-consensuspress-mock-transport.php (90 LOC)"
+      - "tests/test-api-client.php (478 LOC)"
+      - "tests/test-settings.php (103 LOC)"
+      - "phpunit.xml (12 LOC)"
+      - "assets/images/.gitkeep"
+      - "languages/.gitkeep"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 0: PHP AFD Tooling — NEW
+  # ---------------------------------------------------------------------------
+  sprint_tooling:
+    name: "Phase 0 — PHP AFD Tooling"
+    status: "NOT STARTED"
+    priority: "P0 — BEFORE any feature sprint"
+    session_estimate: "1-2 sessions"
+    depends_on: []
+
+    deliverables:
+      - "tools/php-afd/hal001_php_scanner.php (~250 LOC)"
+      - "tools/php-afd/inventory_php.php (~200 LOC)"
+      - "tools/php-afd/diff_inventories_php.php (~150 LOC)"
+      - "tools/php-afd/spec_lint_php.php (~300 LOC)"
+      - "tools/php-afd/wp_compliance_scanner.php (~200 LOC)"
+      - "tools/php-afd/validate_all_php.sh (~80 LOC)"
+      - "Tests for each tool"
+
+    total_loc: "~1,180 + tests"
+
+    exit_criteria:
+      - "All 6 tools pass their own test suites"
+      - "hal001_php_scanner runs against Sprint 1 — produces baseline"
+      - "wp_compliance_scanner runs against Sprint 1 — confirms 0 violations"
+      - "inventory_php generates correct YAML for all 3 production files"
+
+  # ---------------------------------------------------------------------------
+  # PHASE 0.5: Four Ills Baseline + Sprint 1 Remediation
+  # ---------------------------------------------------------------------------
+  sprint_baseline:
+    name: "Phase 0.5 — Four Ills Baseline + Sprint 1 ILL-1 Fix"
+    status: "NOT STARTED"
+    priority: "P0 — immediately after tooling"
+    session_estimate: "0.5 sessions (can combine with tooling session)"
+    depends_on: ["sprint_tooling"]
+
+    deliverables:
+      - "bootstrap/consensuspress_hal001_baseline_cp01.yaml"
+      - "CCI-CP-03-01: Sprint 1 ILL-1 remediation"
+      - "PHPDoc array shape annotations on all return types"
+      - "Runtime key validation helper function"
+
+    exit_criteria:
+      - "hal001_php_scanner exit 0 on all Sprint 1 files"
+      - "Baseline document complete with violation count and classifications"
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 2: Create Mode
+  # ---------------------------------------------------------------------------
+  sprint_2:
+    name: "Create Mode — Topic → API → Draft Post"
+    status: "NOT STARTED"
+    priority: "P0 — core feature"
+    session_estimate: "1-2 sessions"
+    depends_on: ["sprint_1", "sprint_baseline"]
+
+    new_files:
+      - file: "includes/class-consensuspress-create.php"
+        purpose: "Create mode controller — topic input form → API call → draft"
+        estimated_loc: 250
+      - file: "admin/views/create.php"
+        purpose: "Create mode UI — topic input, mode select, submit"
+        estimated_loc: 80
+      - file: "includes/class-consensuspress-post-builder.php"
+        purpose: "wp_insert_post wrapper — title, content, categories, featured image"
+        estimated_loc: 300
+      - file: "includes/class-consensuspress-rank-math.php"
+        purpose: "Rank Math meta injection — 9 fields, schema markup, graceful degradation"
+        estimated_loc: 200
+      - file: "tests/test-create.php"
+        purpose: "Create mode tests"
+        estimated_loc: 200
+      - file: "tests/test-post-builder.php"
+        purpose: "Post builder tests"
+        estimated_loc: 200
+      - file: "tests/test-rank-math.php"
+        purpose: "Rank Math integration tests"
+        estimated_loc: 150
+      - file: "tests/test-schema.php"
+        purpose: "JSON-LD schema validation tests"
+        estimated_loc: 100
+
+    total_loc: "~1,480"
+    test_scenarios: "~20"
+
+    four_ills_protocol:
+      ill_1: "D1 must define typed array shapes for all API response consumption"
+      ill_2: "D2 contracts: API response → post builder → WP, API response → Rank Math"
+      ill_4: "D0 inventories on any modified Sprint 1 files"
+      cci_required: true
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 3: Async Processing + Meta Box
+  # ---------------------------------------------------------------------------
+  sprint_3:
+    name: "Async Processing + Consensus Meta Box"
+    status: "NOT STARTED"
+    priority: "P0 — completes MVP"
+    session_estimate: "1 session"
+    depends_on: ["sprint_2"]
+
+    new_files:
+      - file: "includes/class-consensuspress-async.php"
+        purpose: "AJAX polling for long-running consensus queries (30-60s)"
+        estimated_loc: 200
+      - file: "admin/views/results-metabox.php"
+        purpose: "Post edit screen meta box — score, risk, provider info"
+        estimated_loc: 120
+      - file: "admin/js/consensuspress-create.js"
+        purpose: "Create mode JS — progress bar, polling, result display"
+        estimated_loc: 150
+      - file: "tests/test-async.php"
+        purpose: "Async polling tests"
+        estimated_loc: 150
+      - file: "tests/test-metabox.php"
+        purpose: "Meta box rendering tests"
+        estimated_loc: 100
+
+    total_loc: "~720"
+    test_scenarios: "~10"
+
+    milestone: "MVP — Create mode working end-to-end with async + meta box"
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 4: Rescue Mode + Diff Viewer
+  # ---------------------------------------------------------------------------
+  sprint_4:
+    name: "Rescue Mode — Existing Post → Restructured Draft"
+    status: "NOT STARTED"
+    priority: "P1"
+    session_estimate: "1-2 sessions"
+    depends_on: ["sprint_2"]   # Can start in parallel with Sprint 3
+
+    new_files:
+      - file: "includes/class-consensuspress-rescue.php"
+        purpose: "Rescue mode controller — post selector → content extraction → API"
+        estimated_loc: 250
+      - file: "includes/class-consensuspress-diff.php"
+        purpose: "Side-by-side diff engine — before/after HTML comparison"
+        estimated_loc: 200
+      - file: "admin/views/rescue.php"
+        purpose: "Rescue mode UI — post search/select, submit"
+        estimated_loc: 80
+      - file: "admin/views/diff-viewer.php"
+        purpose: "Diff viewer template — before/after with highlights"
+        estimated_loc: 100
+      - file: "tests/test-rescue.php"
+        purpose: "Rescue mode tests"
+        estimated_loc: 200
+      - file: "tests/test-diff.php"
+        purpose: "Diff engine tests"
+        estimated_loc: 150
+
+    total_loc: "~980"
+    test_scenarios: "~12"
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 5: Usage Tracking + Tiers
+  # ---------------------------------------------------------------------------
+  sprint_5:
+    name: "Usage Tracking + Tier Enforcement"
+    status: "NOT STARTED"
+    priority: "P1"
+    session_estimate: "1 session"
+    depends_on: ["sprint_2"]
+
+    new_files:
+      - file: "includes/class-consensuspress-usage.php"
+        purpose: "Credit counting, tier limits, usage display, upgrade prompts"
+        estimated_loc: 200
+      - file: "tests/test-usage.php"
+        purpose: "Usage tracking tests"
+        estimated_loc: 150
+
+    total_loc: "~350"
+    test_scenarios: "~8"
+
+  # ---------------------------------------------------------------------------
+  # SPRINT 6: WordPress.org Packaging
+  # ---------------------------------------------------------------------------
+  sprint_6:
+    name: "WordPress.org Submission Packaging"
+    status: "NOT STARTED"
+    priority: "P2"
+    session_estimate: "1 session"
+    depends_on: ["sprint_2", "sprint_3", "sprint_4", "sprint_5"]
+
+    deliverables:
+      - "readme.txt final polish (screenshots, FAQ expansion)"
+      - "Banner image (1544x500) and icon (256x256) for WP.org"
+      - "languages/consensuspress.pot (translation template)"
+      - "Final validate_all_php.sh pass"
+      - "ZIP package for submission"
+      - "SVN repository setup for wordpress.org"
+
+    total_loc: "~200 (mostly readme.txt expansion)"
+    test_scenarios: 0   # No new tests — full regression run
+
+# =============================================================================
+# SECTION 5: SERVER-SIDE WORK (Parallel Track)
+# =============================================================================
+server_side:
+
+  endpoint:
+    path: "POST /api/v1/consensus"
+    server: "Railway — app.seekrates-ai.com"
+    status: "NOT STARTED"
+    blocking: "Live integration testing (not blocking plugin development — mocks decouple)"
+
+  description: |
+    Thin wrapper around consensus_engine.py. Receives JSON request,
+    runs 5-LLM consensus, returns structured JSON response matching
+    the contract defined in consensuspress_mock_api.yaml.
+
+    Currently the Seekrates engine uses web form + email delivery.
+    The API endpoint replaces this with JSON request/response.
+
+  depends_on:
+    - "BUG-105-01 deployed (consensus_engine v5.1.0 with refusal detection)"
+    - "Mock API contract finalized (consensuspress_mock_api.yaml)"
+
+  session_estimate: "1 session (D-C design + C-C implementation)"
+
+  contract_validation: |
+    Mock → Live swap protocol from consensuspress_mock_api.yaml:
+    1. Send fixture_create_success REQUEST to live endpoint
+    2. Validate live RESPONSE has every key from fixture schema
+    3. Run full plugin test suite against live endpoint (no mocks)
+    If ANY key is missing or type mismatches: fix endpoint, not tests.
+
+# =============================================================================
+# SECTION 6: MILESTONE MAP
+# =============================================================================
+milestones:
+
+  M1_tooling_ready:
+    after: "Phase 0 (Tooling Sprint)"
+    what_it_unlocks: "Four Ills enforcement on all PHP code"
+    deliverable: "6 tools installed at ~/tools/php-afd/"
+    gate: "All tools pass their own test suites"
+
+  M2_baseline_clean:
+    after: "Phase 0.5 (Baseline)"
+    what_it_unlocks: "Sprint 1 is provably Four Ills compliant"
+    deliverable: "Baseline document + Sprint 1 ILL-1 remediation"
+    gate: "hal001_php_scanner exit 0 on all production files"
+
+  M3_internal_demo:
+    after: "Sprint 2"
+    what_it_unlocks: "Create mode works end-to-end (with mocks)"
+    deliverable: "Topic → API → Draft post with Rank Math + schema"
+    gate: "All tests pass, hal001 exit 0, wp_compliance exit 0"
+
+  M4_mvp:
+    after: "Sprint 3"
+    what_it_unlocks: "Product feels complete for Create mode"
+    deliverable: "Async polling + meta box + progress indicator"
+    gate: "End-to-end demo with 60-second simulated delay"
+
+  M5_full_feature:
+    after: "Sprint 4"
+    what_it_unlocks: "Both modes complete — Create + Rescue"
+    deliverable: "Rescue mode + diff viewer"
+    gate: "Full regression: all sprints, all tests, all scanners"
+
+  M6_revenue_ready:
+    after: "Sprint 5"
+    what_it_unlocks: "Tier enforcement enables monetization"
+    deliverable: "Credit counting + upgrade prompts"
+    gate: "Free tier limit enforced, paid tier unlocked"
+
+  M7_public_launch:
+    after: "Sprint 6"
+    what_it_unlocks: "WordPress.org distribution"
+    deliverable: "SVN submission package"
+    gate: "validate_all_php exit 0 + manual WP.org checklist complete"
+
+# =============================================================================
+# SECTION 7: SESSION SEQUENCE (Recommended)
+# =============================================================================
+session_sequence:
+
+  session_03:
+    focus: "Phase 0 — PHP AFD Tooling (tools 1-3)"
+    d_c: "Design tool specifications (D1-D7 for each tool)"
+    c_c: "Implement hal001_php_scanner, inventory_php, wp_compliance_scanner"
+    exit: "3 tools passing their test suites"
+
+  session_04:
+    focus: "Phase 0 cont. — Tools 4-6 + Phase 0.5 Baseline"
+    d_c: "Design remaining tools + produce Sprint 1 baseline"
+    c_c: "Implement diff_inventories, spec_lint, validate_all + Sprint 1 ILL-1 fix"
+    exit: "All 6 tools working. Sprint 1 baseline clean."
+
+  session_05:
+    focus: "Sprint 2 — Create Mode"
+    d_c: "D1-D7 for Create mode (4 production files + 4 test files)"
+    c_c: "Implement Create mode"
+    exit: "Topic → draft post working with mock API"
+
+  session_06:
+    focus: "Sprint 2 completion + Sprint 3 start"
+    d_c: "QC Sprint 2 delivery + D1-D7 for Async + Meta Box"
+    c_c: "Sprint 2 fixes (if any) + Sprint 3 implementation"
+    exit: "MVP — Create mode with async polling and meta box"
+
+  session_07:
+    focus: "Sprint 4 — Rescue Mode + Diff"
+    d_c: "D1-D7 for Rescue mode"
+    c_c: "Implement Rescue mode + diff viewer"
+    exit: "Both modes working"
+
+  session_08:
+    focus: "Sprint 5 — Usage Tracking"
+    d_c: "D1-D7 for Usage tracking"
+    c_c: "Implement credit counting + tier enforcement"
+    exit: "Revenue-ready"
+
+  session_09:
+    focus: "Sprint 6 — WordPress.org Packaging"
+    d_c: "Submission checklist + final QC"
+    c_c: "readme.txt polish, .pot file, ZIP packaging"
+    exit: "Submission-ready package"
+
+  session_10:
+    focus: "Server-side endpoint + Live integration"
+    d_c: "POST /api/v1/consensus endpoint design"
+    c_c: "Endpoint implementation + mock→live swap verification"
+    exit: "Plugin working against live Seekrates API"
+
+  note: |
+    Sessions 5-6 can overlap with Session 10 (server-side).
+    Sprint 4 can start before Sprint 3 completes (independent paths).
+    Optimistic: 8 sessions. Realistic: 10-12. Worst case: 14.
+
+# =============================================================================
+# SECTION 8: OPEN DECISIONS
+# =============================================================================
+open_decisions:
+
+  OD-CP-001:
+    question: "WP minimum version 6.2 — formal confirmation?"
+    status: "Used in Sprint 1, awaiting explicit approval"
+    owner: "Mohan"
+    d_c_recommendation: "6.2"
+
+  OD-CP-002:
+    question: "Local WP test environment for integration testing?"
+    options: ["wp-env (Docker)", "Local by Flywheel", "MAMP", "Docker Compose"]
+    status: "Unanswered since Session 01"
+    owner: "Mohan"
+    d_c_recommendation: "wp-env — official WordPress tooling, Docker-based"
+
+  OD-CP-003:
+    question: "AJAX vs REST API for main operations (Create/Rescue)?"
+    status: "Unanswered since Session 01"
+    owner: "Mohan"
+    d_c_recommendation: "REST for main ops (POST /wp-json/consensuspress/v1/create), AJAX for polling"
+
+  OD-CP-004:
+    question: "Phase 0 tooling — proceed before or after Sprint 2?"
+    status: "NEW — raised this session"
+    owner: "Mohan"
+    d_c_recommendation: "BEFORE. Without tooling, Sprint 2 repeats the same faith-based delivery."
+
+  OD-CP-005:
+    question: "YAML parser for spec_lint_php — ext-yaml or symfony/yaml?"
+    status: "NEW"
+    owner: "D-C (technical decision)"
+    d_c_recommendation: "symfony/yaml via Composer — more portable, no PHP extension required"
+
+# =============================================================================
+# SECTION 9: RISK REGISTER
+# =============================================================================
+risks:
+
+  R-CP-001:
+    risk: "PHP has no TypedDict equivalent — ILL-1 defence is weaker than Python"
+    mitigation: |
+      PHPDoc array shapes (@return array{key: type}) provide documentation-level typing.
+      PHPStan/Psalm can enforce these statically. Runtime validation functions provide
+      execution-level enforcement. Combined: weaker than Pydantic but stronger than nothing.
+    severity: "HIGH"
+    status: "Accepted — mitigations designed into tooling"
+
+  R-CP-002:
+    risk: "Token-based PHP scanner may miss edge cases that AST-based Python scanner catches"
+    mitigation: |
+      PHP's token_get_all() is more limited than Python's ast module.
+      Supplemented with targeted regex patterns. Test suite includes
+      edge cases (multi-line signatures, heredoc, nowdoc, nested functions).
+    severity: "MEDIUM"
+    status: "Accepted — test coverage compensates"
+
+  R-CP-003:
+    risk: "Railway API endpoint not built — blocks live testing"
+    mitigation: "Mock API decouples plugin development. Endpoint built in parallel (Session 10)."
+    severity: "MEDIUM"
+    status: "Mitigated by architecture (transport injection)"
+
+  R-CP-004:
+    risk: "WordPress.org review process is slow (weeks) and unpredictable"
+    mitigation: |
+      wp_compliance_scanner catches known rejection patterns.
+      readme.txt follows exact WordPress.org format.
+      Plugin Handbook requirements checked before submission.
+    severity: "LOW"
+    status: "Accepted — scanner reduces risk"
+
+  R-CP-005:
+    risk: "Sprint 1 ILL-1 violations compound into Sprint 2"
+    mitigation: "Phase 0.5 fixes Sprint 1 before Sprint 2 begins."
+    severity: "HIGH"
+    status: "Mitigated by project plan sequence"
+
+# =============================================================================
+# SECTION 10: LESSONS INHERITED
+# =============================================================================
+lessons_inherited:
+
+  from_seekrates_publisher:
+    - "L1: One production folder. No backup clones."
+    - "L2: Verify src/ contents before running any tests."
+    - "L3: The zip you submit is the zip that gets tested."
+    - "L4: Shared fixtures in conftest/bootstrap."
+    - "L5: Adapt deploy scripts. Read every hardcoded path."
+    - "L6: venv lives in parent directory."
+    - "L7: Three-stage deploy protocol."
+
+  from_shiftlog_deploy:
+    - "LA: SQLite masks errors PostgreSQL enforces — test on target DB."
+    - "LB: Grep patterns must match syntactic form, not substring."
+    - "LC: Never rename parent directory."
+    - "LD: Use python3 not python."
+    - "LE: Delete .pytest_cache after directory disruption."
+
+  from_session_37:
+    - "L-S37: Semantic contract mismatches between producer and consumer cause integration failures."
+    - "Prevention: Mock API spec defines contract. Endpoint must match mock. Fix endpoint, not tests."
+
+  from_four_ills_purge:
+    - "L-4I: ILL-1 is most prevalent. Scanner output drives prioritization."
+    - "L-4I: All four ills prevented simultaneously by CCI protocol."
+    - "L-4I: Machine-generated D0 only. Manual enumeration fails."
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-28"
+    author: "D-C (Session 02)"
+    reviewer: "Mohan (pending)"
+    changes: "Initial project plan — Phase 0 tooling + 6 feature sprints + milestones"
+
+# =============================================================================
+# END OF PROJECT PLAN
+# =============================================================================

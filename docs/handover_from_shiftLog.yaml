@@ -1,0 +1,575 @@
+# =============================================================================
+# CONSENSUSPRESS — PROJECT HANDOVER DOCUMENT v1.0.0
+# =============================================================================
+# document:      consensuspress_handover.yaml
+# purpose:       Lessons learned from ShiftLog Sessions 01-07, translated into
+#                concrete setup instructions for ConsensusPress.
+# author:        D-C (Designer Claude)
+# created:       2026-02-27
+# session:       ShiftLog Session 07 (final session before Railway deploy)
+# for:           D-C @ ConsensusPress (first session)
+# =============================================================================
+# WHAT IS CONSENSUSPRESS?
+# =============================================================================
+# ConsensusPress by Seekrates — WordPress plugin.
+# Connects to the Seekrates AI 5-LLM consensus engine (Railway:
+# app.seekrates-ai.com) to generate and rescue blog content validated by
+# five independent AI providers (OpenAI, Claude, Gemini, Mistral, Cohere).
+#
+# The plugin is a thin API client. All intelligence stays on Seekrates server.
+# WordPress-native delivery: auto-import as draft, featured image sideload,
+# Rank Math metadata injection, schema markup insertion, Rescue diff comparison.
+#
+# Two modes:
+#   Create  — topic → consensus-validated draft post
+#   Rescue  — existing post → restructured for AI-search survival
+#
+# Positioning: AI-Search Resilient Content Infrastructure for WordPress.
+#   NOT an AI writer. NOT competing with Jasper/Copy.ai on speed or volume.
+#   Competing on structural reliability, hallucination filtering, AI citation readiness.
+#
+# Distribution: WordPress.org, WarriorPlus, WarriorForum WSO, direct, agency white-label.
+# Methodology: AFD + Seekrates Test Regime. Three-Team protocol.
+# Status: HLR approved. AFD cycle ready to begin.
+#
+# ARCHITECTURE NOTE FOR D-C:
+#   This is a PHP WordPress plugin — not a Python SaaS.
+#   The lessons from ShiftLog (Python/FastAPI) apply to methodology and process,
+#   not to stack. DNA headers, AFD D1-D7, three-team protocol, deploy gates —
+#   all carry over. The specific tooling (pytest, uvicorn, Railway) does not.
+#   ConsensusPress ships to WordPress.org and WarriorPlus, not Railway.
+# =============================================================================
+# PREAMBLE
+# =============================================================================
+# ShiftLog reached the following state before this handover was written:
+#   - v0.6.1 canonical codebase confirmed
+#   - 152/152 pytest green (production and deploy folders)
+#   - DNA 21/21 compliant
+#   - HAL-001 scanner: 0 violations
+#   - Hallucination sweep: all CLEAN
+#   - deploy_to_railway_shiftlog.sh: 6-gate pipeline proven
+#   - Railway deployment: next session (Stage 3 pytest → Y to push)
+#
+# The path to this state was NOT clean. Seven sessions of archaeology,
+# incorrect zips, broken src folders, backup proliferation, fixture
+# infrastructure gaps, and false-positive scan alerts.
+#
+# This document exists so ConsensusPress does not repeat any of it.
+# =============================================================================
+
+
+# =============================================================================
+# SECTION 1: THE SEVEN LESSONS
+# =============================================================================
+lessons_learned:
+
+  lesson_1:
+    title: "ESTABLISH THE CANONICAL CODEBASE ON DAY ONE"
+    severity: "CRITICAL"
+    what_happened: |
+      ShiftLog had at least 8 backup folders by Session 07:
+        xxx_shiftlog_production/
+        xxx_shiftlog_production 2/
+        xxx_shiftlog_production 3/
+        xxx_shiftlog_production-backup/
+        xyx_shiftlog_production/
+        shiftlog_deploy/
+        shiftlog_production/   ← contained SEEKRATES code, not ShiftLog
+        shiftlog_MASTER/       ← built by D-C in session 07 from Archive.zip
+
+      All backup folders had identical DNA timestamps (last_updated: 2026-02-20).
+      Differentiating them required scanning for Sprint 9 files (timeline.py,
+      topic_clustering.py) as a completeness marker.
+
+      Two full sessions were spent identifying which folder was real.
+
+    root_cause: |
+      No canonical codebase rule existed at project start.
+      Each time something broke, a new backup was created rather than
+      fixing the original. Folder proliferation compounded over sprints.
+
+    rule_for_consensuspress: |
+      DAY ONE RULE: One production folder. One deploy folder. No others.
+
+        consensuspress_production/   ← THE canonical source
+        consensuspress_deploy/       ← rsync output only, rebuilt each deploy
+
+      Any other copy is deleted immediately. No "just in case" backups.
+      If something breaks, fix it in production. That is what git is for.
+
+    enforcement: |
+      After every session: ls -la consensuspress/ should show exactly:
+        consensuspress_production/
+        consensuspress_deploy/        (if a deploy has been run)
+        consensuspress_MASTER/        (only if D-C explicitly created it)
+        venv/
+        bootstrap/
+        docs/
+        config/
+        deploy_to_railway_consensuspress.sh
+        validation_reports/
+        .gitignore
+        README.md
+
+      Anything else: delete before closing the session.
+
+
+  lesson_2:
+    title: "VERIFY src/ CONTENTS BEFORE RUNNING ANY TESTS"
+    severity: "CRITICAL"
+    what_happened: |
+      shiftlog_production/src/ contained Seekrates architecture
+      (agents/, billing/, core/, telemetry/, transformers/) instead of
+      ShiftLog architecture (api.py, database.py, ingestion.py, etc.).
+
+      Tests failed with confusing import errors. Two sessions spent
+      diagnosing what was actually a wrong-project src folder.
+
+    detection_command: |
+      Run this at the start of every session:
+
+        ls consensuspress_production/src/
+
+      The output must match the expected architecture exactly.
+      If unexpected files appear, STOP. Do not run pytest. Do not proceed.
+      Identify the source and replace src/ from the correct zip.
+
+    rule_for_consensuspress: |
+      Session start protocol (mandatory):
+        1. ls -la consensuspress_production/src/
+        2. Verify file count and key filenames match expected
+        3. Only then: python -m pytest tests/ -q
+      
+      Never assume src/ is correct because it was correct last session.
+      Dropbox sync can overwrite files silently.
+
+
+  lesson_3:
+    title: "THE ZIP YOU SUBMIT IS THE ZIP THAT GETS TESTED"
+    severity: "HIGH"
+    what_happened: |
+      Session 5 achieved 152/152 green and produced shiftlog_v0.6.1_152_green.zip.
+      Session 6 submitted Archive.zip (a pre-Session-5 codebase) for DNA audit.
+      D-C applied DNA fixes to the wrong codebase.
+      Pytest gate was blocked for the entire session because the base was stale.
+
+      The 152-green zip existed. It just was not the zip that was submitted.
+
+    rule_for_consensuspress: |
+      When submitting a zip to D-C for audit:
+        1. Unzip it locally first: unzip -l the_zip_you_are_about_to_submit.zip
+        2. Verify it contains the Sprint N marker files
+        3. THEN attach it
+
+      Label every zip with sprint and test count:
+        consensuspress_v1.0.0_sprint3_88green.zip
+        consensuspress_v1.2.0_sprint5_134green.zip
+
+      Never submit a zip from a previous session without verifying its contents.
+
+
+  lesson_4:
+    title: "SHARED FIXTURES MUST BE IN CONFTEST — NOT IN TEST FILES"
+    severity: "HIGH"
+    what_happened: |
+      Sprint 9 C-C delivered test_timeline.py and test_topic_clustering.py.
+      These test files used fixtures: client, db_session, create_test_user,
+      auth_headers, login_session.
+
+      These fixtures were defined inside test_api.py and test_web.py as
+      module-level fixtures — never promoted to conftest_sprint9.py.
+
+      Result: 26 errors when running the full suite. Each Sprint 9 test
+      failed at collection because the fixtures did not exist in shared scope.
+
+      The fix was a new conftest_sprint9.py, registered in conftest.py via
+      pytest_plugins = ["tests.conftest_sprint9"].
+
+    rule_for_consensuspress: |
+      D-C SPECIFICATION RULE: Every sprint's C-C instruction must include
+      a conftest section that lists:
+        a) Which fixtures the new tests require
+        b) Whether those fixtures already exist in shared conftest
+        c) If not: the exact conftest file to create them in
+        d) The pytest_plugins registration line to add to conftest.py
+
+      C-C must not be left to infer fixture scope. It will define fixtures
+      locally in test files and they will not be visible to other test modules.
+
+
+  lesson_5:
+    title: "THE DEPLOY SCRIPT IS PROJECT-SPECIFIC — ADAPT IT, DO NOT SHARE IT"
+    severity: "MEDIUM"
+    what_happened: |
+      The Seekrates deploy script (deploy_to_railway.sh v3.9.1) was proposed
+      for ShiftLog reuse. It had 8 hardwired Seekrates references:
+        - seekrates_production/ (source folder path)
+        - seekrates_ai.git (GitHub remote)
+        - consensus_engine.py (version gate — Seekrates-specific file)
+        - research_archive.py (version gate — Seekrates-specific file)
+
+      Running it without adaptation would have deployed to the wrong GitHub
+      repo and failed version gates on files that do not exist in ShiftLog.
+
+      Additionally, two scan false positives required two rounds of fixes:
+        - SIN-1: grep matched "Dict[str, Any]" in a docstring (not code)
+        - DNA remnant: grep matched gps_coordinate ORM column (not header)
+
+    rule_for_consensuspress: |
+      The deploy script for ConsensusPress is:
+        deploy_to_railway_consensuspress.sh
+
+      Adapt from deploy_to_railway_shiftlog.sh. Changes required:
+        1. SOURCE_FOLDER: consensuspress_production/
+        2. GITHUB_REMOTE: Mohan-Iyer/consensuspress-plugin
+        3. SPRINT_MARKER: the key file that confirms latest sprint is present
+        4. VERSION_GATE: remove or replace Procfile/timeline.py checks
+        5. Verify SIN-1 grep uses annotation-form: ": Dict[str, Any]" not substring
+        6. Verify DNA remnant check uses "^# gps_coordinate:" not bare substring
+
+      Never run a deploy script from another project without reading every
+      hardcoded path.
+
+
+  lesson_6:
+    title: "VENV LIVES IN THE PARENT DIRECTORY — NEVER IN PRODUCTION"
+    severity: "MEDIUM"
+    what_happened: |
+      This rule was established in Session 01 and held throughout.
+      Recorded here because it is easy to forget on a new project.
+
+      Production folder must remain compact for Railway deployment.
+      venv/ inside consensuspress_production/ would add ~400MB to rsync
+      and potentially to the deploy folder and the GitHub push.
+
+    rule_for_consensuspress: |
+      venv lives at: consensuspress/venv/
+      Production folder lives at: consensuspress/consensuspress_production/
+
+      The deploy script's rsync already excludes venv/ by name.
+      But if venv is inside production, rsync -L (resolve symlinks) may
+      still pull it in. Keep it in the parent. Always.
+
+
+  lesson_7:
+    title: "THREE-STAGE DEPLOY PROTOCOL — NO SHORTCUTS"
+    severity: "MEDIUM"
+    what_happened: |
+      The protocol was established correctly but nearly bypassed.
+      The temptation after a clean deploy script run is to push immediately.
+
+      Stage 3 (pytest inside shiftlog_deploy/) is not redundant.
+      DNA stripping can silently break imports if a DNA comment happens to
+      sit on a line that Python parses differently after stripping.
+      The deploy folder must be independently verified before Railway sees it.
+
+    rule_for_consensuspress: |
+      THREE STAGES — MANDATORY:
+        Stage 1: pytest in consensuspress_production/ → must be 100% green
+        Stage 2: run deploy_to_railway_consensuspress.sh → answer Y/Y/Y/Y/Y/n
+        Stage 3: pytest in consensuspress_deploy/ → must be 100% green
+        Stage 4: re-run script → answer Y/Y/Y/Y/Y/Y → Railway
+
+      If Stage 3 fails: fix in production, re-run from Stage 1.
+      Never push a deploy folder that has not been pytest-verified.
+
+
+# =============================================================================
+# SECTION 2: DOCS TO COPY, SYMLINK, CREATE NEW
+# =============================================================================
+document_registry:
+
+  # ---------------------------------------------------------------------------
+  # SYMLINK — canonical tools, do not copy
+  # ---------------------------------------------------------------------------
+  symlink:
+    description: |
+      These live in decision_referee_clean/tools/ and are shared across
+      all projects via symlinks. Symlinking ensures a single canonical
+      version — any update propagates to all projects instantly.
+      Never copy these files. Never edit local copies.
+
+    items:
+      - source: "decision_referee_clean/tools/"
+        target: "consensuspress_production/tools"
+        command: |
+          ln -s /Users/mohaniyer/Library/CloudStorage/Dropbox/AI_Applications/agents/decision_referee_clean/tools \
+                /Users/mohaniyer/Library/CloudStorage/Dropbox/AI_Applications/agents/consensuspress/consensuspress_production/tools
+        contains:
+          - "hal001_scanner.py — Four Ills structural scanner"
+          - "detect_indentation_logic.py — CCS-003 indentation scan"
+          - "(future) run_hallucination_sweep_v2.py — 7 Deadly Sins"
+        verify: "ls -la consensuspress_production/tools/ | grep '->'"
+
+
+  # ---------------------------------------------------------------------------
+  # COPY AND ADAPT — project-specific, starts from ShiftLog version
+  # ---------------------------------------------------------------------------
+  copy_and_adapt:
+    description: |
+      These are project-specific files that begin as copies of the ShiftLog
+      versions but require adaptation. Copy, then edit. Do not symlink.
+
+    items:
+      - source: "shiftlog/deploy_to_railway_shiftlog.sh"
+        target: "consensuspress/deploy_to_railway_consensuspress.sh"
+        changes_required:
+          - "Line ~121: seekrates_production → consensuspress_production"
+          - "All cleanup/scan paths: shiftlog_production → consensuspress_production"
+          - "GitHub remote: shiftlog-saas → [consensuspress repo name]"
+          - "Sprint marker file: timeline.py → [ConsensusPress Sprint N marker]"
+          - "Version gate: Procfile check (keep), requirements.txt (keep)"
+          - "Banner text: ShiftLog → ConsensusPress"
+        verify: "bash deploy_to_railway_consensuspress.sh — Gate 0 prompt appears"
+
+      - source: "shiftlog/shiftlog_production/tests/conftest_sprint9.py"
+        target: "consensuspress_production/tests/conftest_sprint9.py"
+        notes: |
+          A template for sprint-specific shared fixture conftest.
+          Rename and adapt fixture names and DB setup for ConsensusPress.
+          This is the file whose ABSENCE caused 26 errors in ShiftLog Session 07.
+
+      - source: "decision_referee_clean/templates/afd/script_dna_template.yaml"
+        target: "consensuspress_production/docs/script_dna_template.yaml"
+        notes: "Reference only — C-C uses this when writing DNA headers"
+
+
+  # ---------------------------------------------------------------------------
+  # CREATE NEW — ConsensusPress-specific, no ShiftLog equivalent
+  # ---------------------------------------------------------------------------
+  create_new:
+    description: |
+      These documents do not exist yet. D-C @ ConsensusPress must create them
+      in Session 01 before any C-C work begins.
+
+    items:
+      - document: "consensuspress_project_instructions.yaml"
+        location: "Claude Project knowledge (upload to project)"
+        purpose: "The hydration document — D-C reads this at every session start"
+        must_contain:
+          - "Product definition and GPS prefix"
+          - "Current state (sprint, test count, canonical folder location)"
+          - "Canonical codebase rule (Lesson 1)"
+          - "Session start protocol (ls src/, verify, then pytest)"
+          - "Three-team protocol reference"
+          - "Deployment pipeline reference"
+          - "Phase 2 backlog"
+          - "Known standing rules"
+        template: "Adapt from shiftlog_project_instructions.yaml"
+
+      - document: "consensuspress_canonical_codebase_log.yaml"
+        location: "consensuspress/docs/"
+        purpose: |
+          Single source of truth for codebase state at each sprint boundary.
+          Prevents the ShiftLog Session 07 archaeology problem.
+        must_contain:
+          - "sprint_n: {zip_name, test_count, key_files_present, sha256_of_zip}"
+        update_rule: "D-C updates this at the END of every session, before closing"
+
+      - document: "consensuspress_session_log.yaml"
+        location: "consensuspress/bootstrap/"
+        purpose: "Running session log — what was done, what is next"
+        template: "One entry per session, chronological"
+
+      - document: "deploy_to_railway_consensuspress.sh"
+        location: "consensuspress/"
+        purpose: "Project-specific deploy pipeline"
+        source: "Adapt from deploy_to_railway_shiftlog.sh (see copy_and_adapt above)"
+
+
+  # ---------------------------------------------------------------------------
+  # READ-ONLY REFERENCE — do not copy, do not edit, access via symlink or upload
+  # ---------------------------------------------------------------------------
+  reference_only:
+    description: |
+      These are methodology documents that D-C reads but does not own.
+      They live in decision_referee_clean/ and are the canonical versions.
+      Upload to Claude Project as read-only context.
+
+    items:
+      - "four_ills_guardrail_system.yaml — The Four LLM Ills taxonomy and full guardrail stack"
+      - "afd_overview.yaml — AFD principles 1-12 with lessons learned"
+      - "afd_workflow.yaml — Sprint workflow, D-C deliverables D1-D7"
+      - "three_team_session_protocol.yaml — Session structure, roles, hand-off rules"
+      - "hallucination_prevention.yaml — Gorse analogy, HAL taxonomy"
+      - "hallucination_governance.yaml — Governance rules for HAL violations"
+      - "script_dna_template.yaml — DNA header template for C-C"
+
+
+# =============================================================================
+# SECTION 3: CONSENSUSPRESS PRODUCTION FOLDER SETUP
+# =============================================================================
+production_folder_setup:
+
+  architecture_note: |
+    ConsensusPress is a PHP WordPress plugin, not a Python SaaS.
+    The folder structure follows WordPress plugin conventions,
+    not the Python package structure used in ShiftLog.
+    Lesson 6 (venv in parent) does not apply — PHP has no venv.
+    Lesson 1 (one production folder) still applies absolutely.
+
+  day_one_commands: |
+    # From the agents/ parent directory:
+    mkdir -p consensuspress/consensuspress_production/{includes,admin,public,templates,tests,assets}
+    mkdir -p consensuspress/consensuspress_production/includes/{api,modes,delivery}
+    mkdir -p consensuspress/{bootstrap,docs,config,plans}
+
+    # WordPress plugin entry point:
+    touch consensuspress/consensuspress_production/consensuspress.php
+    touch consensuspress/consensuspress_production/readme.txt
+    touch consensuspress/consensuspress_production/uninstall.php
+
+    # Create tools symlink:
+    ln -s /Users/mohaniyer/Library/CloudStorage/Dropbox/AI_Applications/agents/decision_referee_clean/tools \
+          consensuspress_production/tools
+
+    # Verify symlink:
+    ls -la consensuspress_production/tools/ | head -3
+
+    # Create .gitignore:
+    cat > consensuspress_production/.gitignore << 'EOF'
+    *.db
+    *.db-journal
+    .env
+    .env.*
+    __pycache__/
+    *.pyc
+    .DS_Store
+    venv/
+    .pytest_cache/
+    *.zip
+    *.tar.gz
+    bootstrap/
+    docs/flow_control/
+    validation_reports/
+    EOF
+
+  expected_state_after_setup: |
+    consensuspress/
+    ├── bootstrap/                     ← IP-protected re-anchors
+    ├── docs/                          ← project docs
+    ├── config/                        ← config files
+    ├── deploy_to_wporg_consensuspress.sh   ← WordPress.org deploy pipeline
+    ├── validation_reports/
+    ├── .gitignore
+    ├── README.md
+    └── consensuspress_production/
+        ├── consensuspress.php         ← plugin entry point
+        ├── readme.txt                 ← WordPress.org listing
+        ├── uninstall.php
+        ├── includes/
+        │   ├── api/                   ← Seekrates API client
+        │   ├── modes/                 ← Create and Rescue mode handlers
+        │   └── delivery/              ← draft import, image sideload, Rank Math, schema
+        ├── admin/                     ← wp-admin UI
+        ├── public/                    ← frontend assets
+        ├── templates/                 ← Blade/PHP templates
+        ├── tests/                     ← PHPUnit tests
+        ├── assets/                    ← CSS, JS, images
+        └── tools -> decision_referee_clean/tools/  ← SYMLINK (hal001 still applies)
+
+
+# =============================================================================
+# SECTION 4: SESSION 01 PROTOCOL FOR CONSENSUSPRESS
+# =============================================================================
+session_01_protocol:
+
+  before_any_dc_work:
+    - "Upload consensuspress_project_instructions.yaml to Claude Project"
+    - "Upload all reference_only docs to Claude Project (read-only context)"
+    - "Confirm production folder exists and src/ is correct"
+    - "Confirm tools/ symlink resolves: python tools/hal001_scanner.py --help"
+    - "Confirm venv is in parent directory, not in production"
+
+  session_01_deliverables:
+    d_c_must_produce:
+      - "D1: Pydantic model specifications"
+      - "D2: Double-entry verification matrix"
+      - "D3: API contracts"
+      - "D4: Test scenarios (as pytest signatures, not YAML prose)"
+      - "D5: Directory map"
+      - "D6: Import specification"
+      - "D7: Test infrastructure (conftest.py contents, pytest_plugins list)"
+    
+    note: |
+      D7 is the lesson from ShiftLog. If D-C does not specify which conftest
+      file holds which fixtures, C-C will define them locally in test files.
+      The first full pytest run will then produce 20+ fixture errors.
+
+  first_test_gate:
+    target: "100% on first run (PHPUnit for PHP, pytest for any Python tooling)"
+    if_fails: |
+      Do not iterate. Stop. Identify which D-doc was incomplete.
+      Fix the D-doc. Re-issue the C-C instruction. One shot only.
+    rationale: |
+      ShiftLog achieved 152/152 across 9 sprints with zero debugging cycles
+      on application code. The fixture infrastructure gap (Lesson 4) was the
+      only exception, and it was a D-C omission — not a C-C error.
+    note_on_stack: |
+      ConsensusPress uses PHPUnit for unit/integration tests and likely
+      wp-browser/Codeception for WordPress integration tests.
+      D7 (test infrastructure) must specify which test runner, which
+      bootstrap file, and which WordPress test fixtures are required.
+
+
+# =============================================================================
+# SECTION 5: THE STANDING RULES
+# =============================================================================
+standing_rules:
+
+  rule_01: "NEVER push to GitHub or deploy until all quality gates pass."
+  rule_02: "No DNA headers missing. No field_contracts absent. No deprecation warnings."
+  rule_03: "We do not ship junk."
+  rule_04: "venv lives in parent directory. Never inside production folder."
+  rule_05: "One production folder. One deploy folder. No backup clones."
+  rule_06: "Three-stage deploy: test production → deploy script → test deploy → Railway."
+  rule_07: "Every sprint: D1-D7 before C-C touches a keyboard."
+  rule_08: "Shared fixtures live in conftest. Never in test files."
+  rule_09: "The zip you submit is the zip that gets tested. Verify before attaching."
+  rule_10: "Session end: update canonical_codebase_log.yaml. No exceptions."
+
+
+# =============================================================================
+# SECTION 6: WHAT WORKED — DO NOT CHANGE
+# =============================================================================
+what_worked:
+
+  three_team_protocol: |
+    D-C specifies. C-C implements. Mohan verifies.
+    This produced 152 tests across 9 sprints with zero debugging cycles
+    on application code. The protocol works. Follow it.
+
+  dna_headers_21_21: |
+    Full DNA compliance on all 21 src files was achieved and maintained.
+    The hal001_scanner.py enforcement made this measurable.
+    ConsensusPress starts with the same standard: 0 undeferred violations
+    before any deployment.
+
+  symlink_for_tools: |
+    tools/ symlink means one canonical scanner, zero drift.
+    Any update to hal001_scanner.py propagates to all projects instantly.
+    Maintain this pattern.
+
+  sprint_markers: |
+    Using Sprint N marker files (timeline.py for Sprint 9) as a quick
+    completeness test proved invaluable for codebase identification.
+    ConsensusPress should establish a Sprint N marker convention from Day 1.
+
+  deploy_gate_order: |
+    Gate 4 (Railway confirmation) BEFORE Gate 3 (GitHub push).
+    This is the honest gate order from Seekrates v3.8.0.
+    Asking after the push is dishonest. Keep this order.
+
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  v1.0.0:
+    date: "2026-02-27"
+    author: "D-C (ShiftLog Session 07)"
+    changes: "Initial handover — 7 lessons from ShiftLog Sessions 01-07"
+
+# =============================================================================
+# END OF DOCUMENT
+# =============================================================================

@@ -1,0 +1,608 @@
+11776# =============================================================================
+# CONSENSUSPRESS — DEPLOYMENT GATE PROTOCOL v1.0.0
+# =============================================================================
+# Document: consensuspress_deploy_gates.yaml
+# Purpose: Quality gates preventing hallucinated/broken code from delivery
+# Adapted from: handover_bug_105_01_deploy.yaml (Seekrates three-gate protocol)
+# Methodology: AFD v1.3.0
+# Author: D-C (Session 01 ConsensusPress)
+# Date: 2026-02-25
+# =============================================================================
+# PRINCIPLE: Code cannot advance to the next stage unless the current gate
+# passes. Every gate is a HARD BLOCKER, not advisory. Failure = STOP.
+# =============================================================================
+
+version: "1.0.0"
+
+# =============================================================================
+# ORIGIN: SEEKRATES DEPLOY PIPELINE (what we're adapting from)
+# =============================================================================
+origin:
+  source: "deploy_to_railway.sh v3.6.0 + pre_deploy_gate.sh"
+  gates:
+    - "Gate 0: Output folder config"
+    - "Gate 0.5: Pre-copy cleanup (.pyc, .DS_Store, etc.)"
+    - "Gate 1: DNA Cascade validation (contract balance)"
+    - "Gate 2a: Hallucination scan (Dict[str,Any] patterns)"
+    - "Gate 2b: Indentation logic scan"
+    - "Auto: Copy files + strip DNA headers (IP protection)"
+    - "Gate 3: GitHub push (force push to origin main)"
+    - "Gate 4: Railway auto-deploys from GitHub"
+  lesson: |
+    BUG-105-01 proved why gates matter: a shadow function (Python's
+    last-definition-wins) silently replaced the real scoring function.
+    Gate 2a would have caught the duplicate. Gate 1 would have caught
+    the contract mismatch. The bug survived because these gates weren't
+    run before that particular change shipped. Gates are non-negotiable.
+
+# =============================================================================
+# CONSENSUSPRESS ADAPTATION: PHP/WordPress Gate System
+# =============================================================================
+# Key differences from Seekrates (Python/Railway):
+#   - PHP instead of Python → different syntax validation
+#   - WordPress coding standards → sanitize/escape/nonce checks
+#   - SVN deployment to WordPress.org → not GitHub/Railway
+#   - DNA headers in PHP comment blocks → same principle, different syntax
+#   - No Pydantic → strict PHP type declarations instead
+#   - No Dict[str, Any] → check for mixed/untyped parameters
+# =============================================================================
+
+# =============================================================================
+# GATE 0: ENVIRONMENT & CLEANUP
+# =============================================================================
+gate_0_environment:
+  name: "Environment & Cleanup"
+  type: "AUTOMATED"
+  blocker: true
+  
+  checks:
+    0.1_directory_structure:
+      command: |
+        # Verify plugin directory structure matches HLR file_structure
+        test -f consensuspress/consensuspress.php &&
+        test -f consensuspress/uninstall.php &&
+        test -f consensuspress/readme.txt &&
+        test -d consensuspress/includes/ &&
+        test -d consensuspress/admin/views/ &&
+        test -d consensuspress/admin/css/ &&
+        test -d consensuspress/admin/js/ &&
+        test -d consensuspress/assets/images/ &&
+        test -d consensuspress/languages/
+      fail_action: "STOP — missing required files/directories"
+
+    0.2_cleanup:
+      command: |
+        # Remove macOS/IDE artifacts
+        find consensuspress/ -name '.DS_Store' -delete
+        find consensuspress/ -name '*.swp' -delete
+        find consensuspress/ -name 'Thumbs.db' -delete
+        find consensuspress/ -name '.phpunit.result.cache' -delete
+        # Remove test files from distribution
+        find consensuspress/ -name 'test_*' -delete
+        find consensuspress/ -name '*_test.php' -delete
+      fail_action: "STOP — cleanup failed"
+
+    0.3_version_consistency:
+      command: |
+        # Plugin header version must match readme.txt Stable tag
+        HEADER_VER=$(grep -m1 'Version:' consensuspress/consensuspress.php | awk '{print $NF}')
+        README_VER=$(grep -m1 'Stable tag:' consensuspress/readme.txt | awk '{print $NF}')
+        [ "$HEADER_VER" = "$README_VER" ] || echo "FAIL: Header=$HEADER_VER, Readme=$README_VER"
+      fail_action: "STOP — version mismatch between plugin header and readme.txt"
+
+  pass_signal: "✅ Gate 0 PASS — environment clean, structure valid, versions match"
+
+# =============================================================================
+# GATE 1: DNA CASCADE VALIDATION (Contract Balance)
+# =============================================================================
+gate_1_dna_cascade:
+  name: "DNA Cascade — Contract Balance"
+  type: "AUTOMATED + MANUAL REVIEW"
+  blocker: true
+  
+  principle: |
+    Every PHP file must have a DNA header. Every OUTPUT must have a matching
+    INPUT consumer. Every INPUT must have a verified producer. Orphan outputs
+    and orphan inputs are bugs. This is double-entry accounting for code.
+
+  checks:
+    1.1_dna_headers_present:
+      command: |
+        # Every PHP file in includes/ must have DNA header
+        for f in consensuspress/includes/class-consensuspress-*.php; do
+          grep -q '# SCRIPT DNA' "$f" || echo "FAIL: Missing DNA header in $f"
+        done
+        # Main plugin file must have DNA header
+        grep -q '# SCRIPT DNA' consensuspress/consensuspress.php || echo "FAIL: Missing DNA in main file"
+      fail_action: "STOP — DNA headers are mandatory on ALL PHP files"
+
+    1.2_contract_balance:
+      description: |
+        Manual D-C review: for each file, verify:
+        - Every OUTPUT DESTINATION has at least one CONSUMER that actually reads it
+        - Every INPUT SOURCE has a PRODUCER that actually writes it
+        - No orphan outputs (data produced but never consumed)
+        - No orphan inputs (data expected but never produced)
+      example: |
+        class-consensuspress-api.php OUTPUTS consensus_response array
+        class-consensuspress-post-builder.php INPUTS consensus_response array
+        → Contract BALANCED ✅
+        
+        class-consensuspress-api.php OUTPUTS error_code
+        Nobody reads error_code
+        → ORPHAN OUTPUT ❌ — who handles errors?
+      fail_action: "STOP — orphan contracts indicate missing integration"
+
+    1.3_hook_registration_balance:
+      command: |
+        # Every add_action/add_filter must reference a function that EXISTS
+        grep -rn 'add_action\|add_filter' consensuspress/includes/ consensuspress/consensuspress.php | \
+          sed "s/.*,\s*['\"]//;s/['\"].*//" | sort -u > /tmp/cp_hooks_registered.txt
+        # Check each registered callback exists as a method or function
+        while read func; do
+          grep -rq "function $func\|function ${func}(" consensuspress/ || \
+            echo "FAIL: Hook callback '$func' not found"
+        done < /tmp/cp_hooks_registered.txt
+      fail_action: "STOP — hook registered but callback function doesn't exist (HAL-003 variant)"
+
+  pass_signal: "✅ Gate 1 PASS — DNA headers present, contracts balanced, hooks wired"
+
+# =============================================================================
+# GATE 2: HALLUCINATION SCAN (HAL-001 through HAL-008 + WP-specific)
+# =============================================================================
+gate_2_hallucination_scan:
+  name: "Hallucination Scan"
+  type: "AUTOMATED"
+  blocker: true
+  
+  principle: |
+    AI-generated code hallucinates in predictable patterns. These 8 markers
+    (plus 6 WordPress-specific markers) catch the most common failure modes.
+    ANY detection = delivery blocked. No exceptions. No "fix it later."
+
+  # ---------------------------------------------------------------------------
+  # CORE HAL MARKERS (adapted from AFD v1.3.0 for PHP)
+  # ---------------------------------------------------------------------------
+  core_markers:
+
+    HAL-001:
+      name: "Type Erasure"
+      original: "grep -rn 'Dict[str, Any]' src/"
+      php_adaptation: |
+        Check for untyped parameters, mixed types without validation,
+        and generic arrays where typed structures are required.
+      command: |
+        # No untyped function parameters in production code
+        grep -rn 'function.*\$[a-z]' consensuspress/includes/ | grep -v ': ' | grep -v '@param' | \
+          grep -v '__construct' | head -20
+        # No 'mixed' type hints without validation
+        grep -rn ': mixed' consensuspress/includes/
+        # No generic array returns where typed arrays expected
+        grep -rn '@return array$' consensuspress/includes/ | grep -v '@return array<'
+      action: "Add type declarations to ALL function parameters and return types"
+      severity: "🔴 Critical"
+
+    HAL-002:
+      name: "Echo Tests"
+      original: "grep -rn 'assert True' tests/"
+      php_adaptation: "Tests that always pass regardless of input"
+      command: |
+        # No assertTrue(true) or empty test methods
+        grep -rn 'assertTrue.*true\|assertEmpty.*\[\]' tests/
+        # No test methods with empty bodies
+        grep -rn 'function test_' tests/ -A3 | grep -B1 '^\s*}$' | grep 'function test_'
+      action: "Replace with meaningful assertions that test actual behaviour"
+      severity: "🔴 Critical"
+
+    HAL-003:
+      name: "Undefined Calls"
+      original: "python -m py_compile src/*.py"
+      php_adaptation: "Functions, methods, or classes that don't exist"
+      command: |
+        # PHP syntax check on all files
+        for f in $(find consensuspress/ -name '*.php'); do
+          php -l "$f" 2>&1 | grep -v 'No syntax errors'
+        done
+        # Check for calls to undefined WordPress functions (common AI hallucination)
+        grep -rn 'wp_create_post\|wp_add_meta\|wp_get_option\|register_admin_page\|wp_ajax_handler' \
+          consensuspress/includes/
+        # These are INVENTED — correct functions are:
+        # wp_insert_post, update_post_meta, get_option, add_menu_page, add_action('wp_ajax_...')
+      action: "Fix syntax errors, replace invented functions with real WordPress API calls"
+      severity: "🔴 Critical"
+
+    HAL-004:
+      name: "Placeholder Code"
+      original: "grep -rn 'TODO|FIXME|NotImplemented' src/"
+      php_adaptation: "Incomplete implementations shipped as 'done'"
+      command: |
+        grep -rn 'TODO\|FIXME\|HACK\|XXX\|PLACEHOLDER\|NotImplemented\|throw new \\Exception.*implement' \
+          consensuspress/includes/ consensuspress/consensuspress.php
+        # Also check for empty method bodies (silent no-ops)
+        grep -rn 'function [a-z_]*(' consensuspress/includes/ -A2 | grep -B1 'return;$\|return null;$'
+      action: "Complete implementation or remove. No placeholders in delivered code."
+      severity: "🔴 Critical"
+
+    HAL-005:
+      name: "Invented Imports / Classes"
+      original: "python -c 'import src.module'"
+      php_adaptation: "use statements or class references to non-existent code"
+      command: |
+        # Check all require/require_once/include targets exist
+        grep -rn "require\|include" consensuspress/ | grep -v 'vendor' | \
+          sed "s/.*['\"]//;s/['\"].*//" | while read f; do
+            [ -f "consensuspress/$f" ] || echo "FAIL: Required file '$f' does not exist"
+          done
+        # Check for invented WordPress classes
+        grep -rn 'new WP_Ajax\|new WP_Settings\|new WP_Nonce\|new WP_Meta_Box' \
+          consensuspress/includes/
+        # These are INVENTED — WordPress uses functions, not these classes
+      action: "Fix file paths, replace invented classes with real WordPress API"
+      severity: "🔴 Critical"
+
+    HAL-006:
+      name: "Silent Error Swallowing"
+      original: "grep -rn 'except.*:' src/ -A1 | grep -B1 'pass$'"
+      php_adaptation: "Empty catch blocks, unchecked wp_remote_post errors"
+      command: |
+        # No empty catch blocks
+        grep -rn 'catch' consensuspress/includes/ -A2 | grep -B1 '^\s*}$'
+        # No unchecked wp_remote_post / wp_remote_get
+        grep -rn 'wp_remote_post\|wp_remote_get' consensuspress/includes/ -A3 | \
+          grep -v 'is_wp_error\|wp_remote_retrieve'
+        # Every API call MUST check is_wp_error() on the response
+      action: "Add error handling to every catch block, check is_wp_error() on every remote call"
+      severity: "🔴 Critical"
+
+    HAL-007:
+      name: "Hardcoded Secrets"
+      original: "grep -rn 'password|secret|api_key' src/ | grep -v '.env'"
+      php_adaptation: "API keys, passwords, tokens in source code"
+      command: |
+        # No hardcoded API keys or secrets
+        grep -rn "sk-\|sk_live\|sk_test\|Bearer \|api_key.*=.*['\"][a-zA-Z0-9]" \
+          consensuspress/includes/ consensuspress/consensuspress.php
+        # No hardcoded URLs with credentials
+        grep -rn 'http.*:.*@' consensuspress/
+        # API key must come from get_option(), never from source
+        grep -rn "seekrates.*key\|api.*key" consensuspress/includes/ | grep -v 'get_option\|sanitize\|esc_'
+      action: "Move ALL secrets to wp_options via Settings API. Never in source code."
+      severity: "🔴 Critical"
+
+    HAL-008:
+      name: "Unverified Assumptions"
+      original: "Manual review: list all filter/validation logic"
+      php_adaptation: "Filter logic or business rules invented by C-C without D-C specification"
+      command: |
+        # Manual D-C review checklist:
+        # 1. List every if/else branch in production code
+        # 2. Verify each condition was specified by D-C (in c_c_instructions)
+        # 3. Flag any condition C-C invented (AFD violation CI-2.3)
+        # 4. Check all magic numbers have named constants
+        grep -rn 'if.*>.*[0-9]\|if.*<.*[0-9]\|if.*==.*[0-9]' consensuspress/includes/ | \
+          grep -v 'CONSENSUSPRESS_\|WP_\|HTTP_' | head -20
+      action: "Every filter/threshold must trace to D-C spec. No C-C design decisions."
+      severity: "🔴 Critical"
+
+  # ---------------------------------------------------------------------------
+  # WORDPRESS-SPECIFIC HALLUCINATION MARKERS (HAL-WP-001 through HAL-WP-006)
+  # ---------------------------------------------------------------------------
+  wordpress_markers:
+
+    HAL-WP-001:
+      name: "Unsanitised Input"
+      description: "User input reaching database or processing without sanitization"
+      command: |
+        # Find $_POST/$_GET/$_REQUEST usage without sanitization
+        grep -rn '\$_POST\|\$_GET\|\$_REQUEST' consensuspress/includes/ | \
+          grep -v 'sanitize_\|absint\|wp_kses\|intval\|wp_verify_nonce'
+        # Check wp_ajax handlers have nonce verification as FIRST operation
+        grep -rn "function.*ajax\|wp_ajax" consensuspress/includes/ -A5 | \
+          grep -v 'check_ajax_referer\|wp_verify_nonce' | grep 'function.*ajax'
+      action: "Wrap ALL user input in appropriate sanitize_*() function"
+      severity: "🔴 Critical — WordPress.org will REJECT plugin"
+
+    HAL-WP-002:
+      name: "Unescaped Output"
+      description: "Data rendered in HTML without escaping (XSS vector)"
+      command: |
+        # Find echo/print of variables without escaping
+        grep -rn 'echo \$\|print \$' consensuspress/admin/views/ | \
+          grep -v 'esc_html\|esc_attr\|esc_url\|wp_kses\|esc_textarea\|wp_nonce_field'
+        # Find PHP output in templates without escaping
+        grep -rn '<?php echo\|<?=' consensuspress/admin/views/ | \
+          grep -v 'esc_html\|esc_attr\|esc_url\|wp_kses\|esc_textarea'
+      action: "Wrap ALL template output in appropriate esc_*() function"
+      severity: "🔴 Critical — WordPress.org will REJECT plugin"
+
+    HAL-WP-003:
+      name: "Missing Nonce"
+      description: "Form submission or AJAX without CSRF protection"
+      command: |
+        # Every <form> must have wp_nonce_field()
+        grep -rn '<form' consensuspress/admin/views/ -A10 | \
+          grep -v 'wp_nonce_field' | grep '<form'
+        # Every AJAX handler must check nonce
+        grep -rn "wp_ajax_consensuspress" consensuspress/ | \
+          sed 's/.*consensuspress_/consensuspress_/' | sed "s/['\"].*//" | sort -u | \
+          while read action; do
+            grep -rq "check_ajax_referer.*$action" consensuspress/ || \
+              echo "FAIL: AJAX action '$action' has no nonce check"
+          done
+      action: "Add wp_nonce_field() to every form, check_ajax_referer() to every AJAX handler"
+      severity: "🔴 Critical — WordPress.org will REJECT plugin"
+
+    HAL-WP-004:
+      name: "Missing Capability Check"
+      description: "Privileged operation without current_user_can() verification"
+      command: |
+        # Admin page callbacks must check capabilities
+        grep -rn 'function.*page\|function.*settings\|function.*admin' \
+          consensuspress/includes/ -A5 | \
+          grep -v 'current_user_can' | grep 'function.*page\|function.*settings'
+        # Database write operations must check capabilities
+        grep -rn 'update_option\|update_post_meta\|wp_insert_post\|wp_update_post' \
+          consensuspress/includes/ -B5 | \
+          grep -v 'current_user_can' | grep 'update_option\|update_post_meta\|wp_insert'
+      action: "Add current_user_can() check before every privileged operation"
+      severity: "🔴 Critical"
+
+    HAL-WP-005:
+      name: "Inline JavaScript/CSS"
+      description: "Scripts or styles embedded directly instead of enqueued"
+      command: |
+        # No <script> tags in PHP files
+        grep -rn '<script' consensuspress/includes/ consensuspress/admin/views/
+        # No <style> tags in PHP files (except wp_head hooks)
+        grep -rn '<style' consensuspress/includes/ consensuspress/admin/views/
+        # No wp_add_inline_script without wp_enqueue_script first
+        grep -rn 'wp_add_inline' consensuspress/ | head -5
+      action: "Use wp_enqueue_script() and wp_enqueue_style() exclusively"
+      severity: "🟡 Warning — WordPress.org may flag"
+
+    HAL-WP-006:
+      name: "Direct Database Queries"
+      description: "Raw SQL instead of WordPress API functions"
+      command: |
+        # No direct $wpdb queries except for custom table operations
+        grep -rn '\$wpdb' consensuspress/includes/ | \
+          grep -v 'consensuspress_usage\|dbDelta\|prefix\|prepare'
+        # Every $wpdb query MUST use $wpdb->prepare() for parameterisation
+        grep -rn '\$wpdb->query\|\$wpdb->get' consensuspress/includes/ | \
+          grep -v 'prepare'
+      action: "Use WordPress API (get_option, update_post_meta, etc.). Use $wpdb->prepare() for custom table queries."
+      severity: "🟡 Warning"
+
+  pass_signal: "✅ Gate 2 PASS — all 14 hallucination markers clear (HAL-001→008 + HAL-WP-001→006)"
+
+# =============================================================================
+# GATE 3: FUNCTIONAL TESTS
+# =============================================================================
+gate_3_functional_tests:
+  name: "Functional Tests"
+  type: "AUTOMATED"
+  blocker: true
+
+  principle: |
+    Every sprint delivers production code + test code together (AFD Principle 8).
+    Tests must pass on FIRST run (SC-5.1). No "fix it in the next iteration."
+
+  checks:
+    3.1_php_syntax:
+      command: |
+        # Every PHP file must parse without errors
+        find consensuspress/ -name '*.php' -exec php -l {} \; 2>&1 | grep -v 'No syntax errors'
+      fail_action: "STOP — syntax errors in delivered code"
+
+    3.2_phpunit_tests:
+      command: |
+        # Run test suite — ALL must pass
+        cd consensuspress && phpunit --configuration phpunit.xml
+        # Alternative for WP integration tests:
+        # phpunit --configuration phpunit-integration.xml
+      fail_action: "STOP — failing tests block delivery"
+
+    3.3_smoke_test:
+      description: |
+        Before any batch or integration operation:
+        1. Activate plugin on local WordPress test instance
+        2. Navigate to ConsensusPress settings page — must render
+        3. Enter test API key — must save and mask correctly
+        4. Submit one Create query — must return response or timeout gracefully
+        5. Verify draft post created with correct metadata
+      fail_action: "STOP — smoke test failure blocks all further testing"
+      afd_reference: "Principle 12 / CI-2.8: Batch Without Smoke Test"
+
+  pass_signal: "✅ Gate 3 PASS — syntax clean, tests green, smoke test passed"
+
+# =============================================================================
+# GATE 4: DNA HEADER STRIP (IP Protection)
+# =============================================================================
+gate_4_ip_protection:
+  name: "DNA Header Strip for Distribution"
+  type: "AUTOMATED"
+  blocker: true
+
+  principle: |
+    DNA headers contain internal architecture details (contracts, consumers,
+    GPS coordinates). These are stripped from distribution builds to protect IP.
+    The WordPress.org package must contain standard PHPDoc only.
+
+  checks:
+    4.1_strip_dna:
+      command: |
+        # Copy to dist/ folder
+        cp -r consensuspress/ dist/consensuspress/
+        # Strip DNA headers (everything between DNA START and DNA END markers)
+        for f in $(find dist/consensuspress/ -name '*.php'); do
+          sed -i '/# SCRIPT DNA/,/# END DNA/d' "$f"
+          # Verify standard PHPDoc header remains
+          grep -q '@package\|@since\|@author' "$f" || echo "WARN: No PHPDoc in $f"
+        done
+      fail_action: "STOP — DNA headers must not ship to WordPress.org"
+
+    4.2_verify_no_internal_references:
+      command: |
+        # No internal GPS coordinates in distribution
+        grep -rn 'gps_coordinate\|GPS:\|fr_\|uc_\|ec_\|tc_' dist/consensuspress/
+        # No AFD methodology references in distribution
+        grep -rn 'AFD\|Axiom-First\|D-C\|C-C\|HAL-00' dist/consensuspress/
+        # No internal URLs or paths
+        grep -rn 'decision_referee\|seekrates_publisher\|Dropbox' dist/consensuspress/
+      fail_action: "STOP — internal references must not leak to distribution"
+
+  pass_signal: "✅ Gate 4 PASS — distribution clean, no IP leakage"
+
+# =============================================================================
+# GATE 5: WORDPRESS.ORG PACKAGING
+# =============================================================================
+gate_5_packaging:
+  name: "WordPress.org Package Validation"
+  type: "AUTOMATED + MANUAL"
+  blocker: true
+
+  checks:
+    5.1_readme_validation:
+      description: |
+        readme.txt must conform to WordPress.org format:
+        - === Plugin Name === header
+        - Contributors, Tags, Requires at least, Tested up to, Stable tag
+        - == Description ==, == Installation ==, == Changelog ==
+        - Stable tag matches plugin header version
+      command: |
+        # Check required sections exist
+        for section in 'Contributors' 'Tags' 'Requires at least' 'Tested up to' \
+          'Stable tag' '== Description ==' '== Installation ==' '== Changelog =='; do
+          grep -q "$section" dist/consensuspress/readme.txt || echo "FAIL: Missing '$section'"
+        done
+
+    5.2_zip_creation:
+      command: |
+        cd dist/ && zip -r consensuspress.zip consensuspress/ \
+          -x "*.DS_Store" "*__MACOSX*" "*.git*"
+        # Verify zip structure: root must be consensuspress/
+        unzip -l consensuspress.zip | head -5
+
+    5.3_plugin_check:
+      description: |
+        If available, run WordPress Plugin Check tool:
+        https://wordpress.org/plugins/plugin-check/
+        This catches issues the WP.org review team will flag.
+      manual_checklist:
+        - "No PHP errors or warnings at any error_reporting level"
+        - "GPL v2+ compatible license"
+        - "No obfuscated code"
+        - "No phone-home without explicit user consent"
+        - "No tracking without disclosure"
+        - "No external CDN loads without fallback"
+        - "Text domain matches plugin slug"
+        - "All strings wrapped in __() or _e() for translation"
+
+  pass_signal: "✅ Gate 5 PASS — package ready for WordPress.org submission"
+
+# =============================================================================
+# GATE 6: DEPLOYMENT & POST-DEPLOY VERIFICATION
+# =============================================================================
+gate_6_deploy_verify:
+  name: "Deploy & Verify"
+  type: "MANUAL"
+  blocker: true
+
+  deploy_targets:
+    wordpress_org:
+      method: "SVN commit to WordPress.org plugin repository"
+      commands:
+        - "svn co https://plugins.svn.wordpress.org/consensuspress/"
+        - "# Copy dist/consensuspress/ contents to trunk/"
+        - "svn ci -m 'Release v1.0.0'"
+      verify: "https://wordpress.org/plugins/consensuspress/ shows updated version"
+
+    self_hosted:
+      method: "Upload zip to seekrates-ai.com/downloads/"
+      verify: "Download link works, zip installs cleanly on fresh WP"
+
+  post_deploy_verification:
+    fresh_install_test:
+      - "Install on clean WordPress 6.7 instance"
+      - "Activate — no PHP errors in debug.log"
+      - "Settings page renders with all fields"
+      - "API key saves and masks correctly"
+      - "Create mode: submit topic → draft created with metadata"
+      - "Rescue mode: select post → rescued draft created with diff"
+      - "Deactivate — transients cleared, no errors"
+      - "Delete — all data removed (check wp_options, postmeta, custom table)"
+
+    rollback: |
+      WordPress.org: SVN revert to previous tag
+      Self-hosted: Replace zip with previous version
+
+  pass_signal: "✅ Gate 6 PASS — deployed, verified, production confirmed"
+
+# =============================================================================
+# COMPLETE HALLUCINATION MARKER REGISTRY
+# =============================================================================
+# Quick reference: all 14 markers in scan order
+# =============================================================================
+hallucination_marker_registry:
+
+  core_markers:
+    HAL-001: "Type Erasure — untyped params, mixed without validation, generic arrays"
+    HAL-002: "Echo Tests — assertTrue(true), empty test bodies, tests that always pass"
+    HAL-003: "Undefined Calls — invented functions, non-existent methods, bad syntax"
+    HAL-004: "Placeholder Code — TODO, FIXME, NotImplemented, empty method bodies"
+    HAL-005: "Invented Imports — require/include of non-existent files, invented WP classes"
+    HAL-006: "Silent Error Swallowing — empty catch blocks, unchecked wp_remote_post"
+    HAL-007: "Hardcoded Secrets — API keys, passwords, tokens in source code"
+    HAL-008: "Unverified Assumptions — filter logic not in D-C spec, magic numbers"
+
+  wordpress_markers:
+    HAL-WP-001: "Unsanitised Input — $_POST/$_GET without sanitize_*(), AJAX without nonce"
+    HAL-WP-002: "Unescaped Output — echo $var without esc_*() in templates"
+    HAL-WP-003: "Missing Nonce — forms without wp_nonce_field(), AJAX without check_ajax_referer()"
+    HAL-WP-004: "Missing Capability Check — privileged ops without current_user_can()"
+    HAL-WP-005: "Inline JavaScript/CSS — <script>/<style> tags instead of wp_enqueue_*()"
+    HAL-WP-006: "Direct Database Queries — raw $wpdb without prepare(), bypassing WP API"
+
+  total_markers: 14
+  enforcement: "ANY marker detected = delivery BLOCKED. No exceptions."
+
+# =============================================================================
+# GATE SEQUENCE SUMMARY
+# =============================================================================
+gate_sequence:
+  gates:
+    - gate: "Gate 0"
+      name: "Environment & Cleanup"
+      checks: 3
+      type: "Automated"
+    - gate: "Gate 1"
+      name: "DNA Cascade (Contract Balance)"
+      checks: 3
+      type: "Automated + Manual"
+    - gate: "Gate 2"
+      name: "Hallucination Scan (14 markers)"
+      checks: 14
+      type: "Automated"
+    - gate: "Gate 3"
+      name: "Functional Tests"
+      checks: 3
+      type: "Automated"
+    - gate: "Gate 4"
+      name: "DNA Header Strip (IP Protection)"
+      checks: 2
+      type: "Automated"
+    - gate: "Gate 5"
+      name: "WordPress.org Packaging"
+      checks: 3
+      type: "Automated + Manual"
+    - gate: "Gate 6"
+      name: "Deploy & Verify"
+      checks: 2
+      type: "Manual"
+  total_gates: 7
+  total_checks: 30
+  principle: "Sequential. Each gate blocks the next. No skipping. No overrides."
+
+# =============================================================================
+# END OF DEPLOYMENT GATE PROTOCOL
+# =============================================================================

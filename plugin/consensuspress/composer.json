@@ -1,0 +1,8 @@
+{
+    "name": "seekrates/consensuspress",
+    "description": "ConsensusPress by Seekrates AI",
+    "type": "wordpress-plugin",
+    "require-dev": {
+        "phpunit/phpunit": "^9.0"
+    }
+}

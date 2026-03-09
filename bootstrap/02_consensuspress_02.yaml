@@ -1,0 +1,386 @@
+# =============================================================================
+# RE-ANCHOR: 02_consensuspress_02.yaml
+# =============================================================================
+# Covers: Sessions 02-03 (Sprint 1 implementation + Phase 0/0.5 tooling +
+#         repo restructure + CCI-CP-03-01 remediation + Sprint 2 D1-D7)
+# =============================================================================
+
+session:
+  id: 3
+  project: "ConsensusPress"
+  date: "2026-02-28"
+  title: "Sprint 1 complete, tooling operational, repo clean, Sprint 2 spec delivered"
+  duration: "~6 hours (Sessions 02 + 03 combined)"
+  type: "Mixed"
+  previous_reanchor: "01_consensuspress_01.yaml"
+
+# =============================================================================
+# SESSION SUMMARY
+# =============================================================================
+session_summary: |
+  Sprint 1 foundation delivered (13 files, 1,800+ LOC, 16 tests/55 assertions,
+  all passing). Phase 0 built three AFD scanner tools (HAL-001, WP compliance,
+  inventory) with their own test suite (22/22 passing). Phase 0.5 ran baseline
+  scan — found only 3 HAL-001 violations (1 root cause) and 0 real WP compliance
+  issues. CCI-CP-03-01 fixed all violations plus 5 scanner bugs. Repo restructured
+  from 1,870 files of confusion to 45 files of clarity. Sprint 2 D1-D7 spec
+  delivered (1,007 lines) — Create Mode ready for C-C implementation.
+
+# =============================================================================
+# ACHIEVEMENTS
+# =============================================================================
+achievements:
+
+  features_delivered:
+    - id: "FEAT-02-01"
+      description: "Sprint 1 Foundation — plugin skeleton + API client + settings"
+      status: "COMPLETE"
+      detail: |
+        13 files: plugin main, API client with transport interface, settings page,
+        admin CSS/JS, uninstall handler, readme.txt, test bootstrap with WP stubs,
+        mock transport, 2 test files. 16 tests, 55 assertions, first-run pass.
+      files:
+        - "plugin/consensuspress/consensuspress.php"
+        - "plugin/consensuspress/includes/class-consensuspress-api.php"
+        - "plugin/consensuspress/includes/class-consensuspress-settings.php"
+        - "plugin/consensuspress/admin/views/settings.php"
+        - "plugin/consensuspress/admin/css/consensuspress-admin.css"
+        - "plugin/consensuspress/admin/js/consensuspress-admin.js"
+        - "plugin/consensuspress/uninstall.php"
+        - "plugin/consensuspress/readme.txt"
+        - "tests/bootstrap.php"
+        - "tests/class-consensuspress-mock-transport.php"
+        - "tests/test-api-client.php"
+        - "tests/test-settings.php"
+        - "tests/phpunit.xml"
+
+    - id: "FEAT-03-01"
+      description: "Phase 0 — Three AFD scanner tools built and tested"
+      status: "COMPLETE"
+      detail: |
+        hal001_php_scanner.php (ILL-1 type erasure detection, now with WordPress
+        hash notation support). wp_compliance_scanner.php (WP.org submission checks).
+        inventory_php.php (D0 preservation contract generation). Each scanner has
+        PHPUnit tests with fixtures. 22/22 tests passing on macOS PHP 8.4.4.
+      files:
+        - "docs/tooling/php-afd/hal001_php_scanner.php"
+        - "docs/tooling/php-afd/wp_compliance_scanner.php"
+        - "docs/tooling/php-afd/inventory_php.php"
+        - "docs/tooling/php-afd/tests/Hal001ScannerTest.php"
+        - "docs/tooling/php-afd/tests/InventoryTest.php"
+        - "docs/tooling/php-afd/tests/WpComplianceTest.php"
+        - "docs/tooling/php-afd/tests/fixtures/ (6 files)"
+
+    - id: "FEAT-03-02"
+      description: "Phase 0.5 — Four Ills baseline scan of Sprint 1"
+      status: "COMPLETE"
+      detail: |
+        Ran all 3 scanners against Sprint 1 codebase. Found 3 HAL-001 violations
+        (1 root cause: Transport_Interface::post() bare array param), 0 real WP
+        compliance violations (9 flags all false positives). Generated D0 inventory
+        for all 20 callables across 3 production files.
+      files:
+        - "docs/Phase_05_baseline_report.yaml"
+        - "docs/inventories/sprint1/inventory_consensuspress.yaml"
+        - "docs/inventories/sprint1/inventory_class-consensuspress-api.yaml"
+        - "docs/inventories/sprint1/inventory_class-consensuspress-settings.yaml"
+
+  bugs_fixed:
+    - id: "CCI-CP-03-01"
+      description: "Phase 0.5 remediation — PHPDoc fixes + scanner bug fixes"
+      status: "COMPLETE"
+      detail: |
+        Item 1: Added WordPress hash notation PHPDoc shapes to Transport_Interface,
+        WP_Transport, and Mock_Transport post() methods. 0 runtime change.
+        Item 2: Five scanner fixes — (2a) tests dir excluded from WP scanner,
+        (2b) ABSPATH search range 10→30 lines, (2c) WP_UNINSTALL_PLUGIN recognised,
+        (2d) string literal <script> excluded, (2e) WordPress hash notation
+        recognition added to HAL-001 scanner. All verified: 10/10 manual tests,
+        both scanners EXIT 0 against full codebase.
+      files:
+        - "plugin/consensuspress/includes/class-consensuspress-api.php (PHPDoc)"
+        - "tests/class-consensuspress-mock-transport.php (PHPDoc)"
+        - "docs/tooling/php-afd/hal001_php_scanner.php (fix 2e)"
+        - "docs/tooling/php-afd/wp_compliance_scanner.php (fixes 2a-2d)"
+
+  infrastructure:
+    - id: "INF-03-01"
+      description: "Repo restructure — from 1,870 files to 45"
+      status: "COMPLETE"
+      detail: |
+        Deleted: pre-AFD plugin (consensus-press.*), Python generator, config,
+        good_morning.py, requirements.txt, vendor/ (1,800+ Composer deps),
+        symlinks to decision_referee_clean. Created: plugin/consensuspress/
+        (production deployable), tests/ (at repo root, not shipped). Moved:
+        deploy_gates to plans/, workspace file to root.
+
+  docs_created:
+    - id: "DOC-03-01"
+      description: "Sprint 2 D1-D7 specification — Create Mode"
+      status: "COMPLETE"
+      detail: |
+        1,007 lines. 12 method signatures with full PHPDoc shapes. 20 test
+        scenarios (9 Create handler, 11 Post Builder). 6 verified contracts.
+        D0 preservation of all 20 Sprint 1 callables. 14 new WP function stubs
+        specified. Scanner gates defined. Zero ambiguity for C-C.
+      files:
+        - "docs/sprint_2_d1_d7_instructions.yaml"
+
+    - id: "DOC-03-02"
+      description: "CCI-CP-P0-01 — Four Ills PHP Scanner Suite spec"
+      status: "COMPLETE"
+      files:
+        - "docs/tooling/php-afd/CCI-CP-P0-01_four_ills_php_scanner_suite.yaml"
+
+# =============================================================================
+# DECISIONS
+# =============================================================================
+decisions:
+
+  - id: "D-03-01"
+    decision: "Production code lives at plugin/consensuspress/ — this folder gets zipped for WP.org"
+    rationale: "Clean separation of shippable vs dev-only. Tests, docs, tooling never enter the zip."
+    reversible: false
+
+  - id: "D-03-02"
+    decision: "Tests live at repo root tests/ — not inside plugin/"
+    rationale: "WP.org reviewers flag test files inside plugin directory. Keeps plugin/ sacred."
+    reversible: false
+
+  - id: "D-03-03"
+    decision: "WordPress hash notation is the project PHPDoc standard (not PSR inline)"
+    rationale: "WordPress plugin, WordPress conventions. Scanner now recognises both. Path B chosen over Path A to avoid future maintenance."
+    reversible: false
+
+  - id: "D-03-04"
+    decision: "Sprint 2 Create Mode uses synchronous AJAX, not async"
+    rationale: "Simpler, testable. Sprint 3 adds WP-Cron async upgrade. Don't front-load complexity."
+    reversible: true
+
+  - id: "D-03-05"
+    decision: "Post Builder is a separate class, reusable by both Create and Rescue"
+    rationale: "Both modes produce WordPress drafts from API data. Same class, same meta injection, same image sideload. DRY."
+    reversible: false
+
+  - id: "D-03-06"
+    decision: "All consensus metadata stored as underscore-prefixed post_meta from Sprint 2"
+    rationale: "Sprint 3 meta box reads these keys. Writing them now means Sprint 3 is read-only UI work, no data migration."
+    reversible: false
+
+  - id: "D-03-07"
+    decision: "Rank Math fields always written, regardless of Rank Math installation"
+    rationale: "Graceful degradation. Values sit in post_meta. If RM activated later, it reads them immediately. Zero RM dependency in plugin code."
+    reversible: false
+
+  - id: "D-03-08"
+    decision: "Vendor/ and composer.lock excluded from repo, reinstalled locally"
+    rationale: "1,800 files of Composer deps are not source code. composer install recreates from composer.json."
+    reversible: false
+
+  - id: "D-03-09"
+    decision: "AFD scanner gates are acceptance criteria from Sprint 2 onwards"
+    rationale: "Phase 0.5 proved scanners work. If they fire, the D1 was defective — fix spec first, then re-implement. No patching."
+    reversible: false
+
+  - id: "D-03-10"
+    decision: "PHP 7.4 minimum confirmed (updated from WP 5.8 to WP 6.2)"
+    rationale: "Memory edit update. PHP 7.4+ means no union types, no enums, no typed class constants."
+    reversible: true
+
+# =============================================================================
+# CURRENT STATUS
+# =============================================================================
+current_status:
+
+  sprint_1_foundation:
+    status: "COMPLETE"
+    detail: "13 files, 1,800+ LOC, 16 tests/55 assertions, all passing. HAL-001 clean, WP compliance clean."
+    version: "1.0.0"
+
+  afd_tooling:
+    status: "STABLE"
+    detail: "3 scanners operational, 22 scanner tests passing, WordPress hash notation supported."
+    version: "1.0.0 (with CCI-CP-03-01 patches)"
+
+  repo_structure:
+    status: "CLEAN"
+    detail: "21 directories, 45 files. No dead code, no vendor bloat, no orphan symlinks."
+
+  sprint_2_spec:
+    status: "COMPLETE"
+    detail: "D1-D7 delivered (1,007 lines). Ready for C-C implementation."
+
+  server_side_endpoint:
+    status: "BLOCKED"
+    detail: "POST /api/v1/consensus does not exist. Plugin works against mock only."
+
+  local_wp_environment:
+    status: "PENDING"
+    detail: "No local WordPress for smoke testing. Required before Sprint 3."
+
+# =============================================================================
+# BLOCKERS
+# =============================================================================
+blockers:
+
+  active:
+    - id: "B-01-01"
+      description: "POST /api/v1/consensus endpoint not built on Railway"
+      blocking: "Live testing (Sprints 2-4 work against mock)"
+      owner: "Mohan (Railway access)"
+      since: "2026-02-25"
+
+    - id: "B-01-03"
+      description: "Rank Math meta key names not verified against current RM source"
+      blocking: "Confidence in D1 RANK_MATH_KEYS constant"
+      owner: "D-C (web search)"
+      since: "2026-02-25"
+
+  cleared:
+    - id: "B-03-01"
+      description: "Sprint 1 source files not persisted between sessions"
+      resolution: "Extracted from transcript, zipped, deployed to plugin/consensuspress/"
+
+    - id: "B-03-02"
+      description: "WP compliance scanner false positives blocking baseline"
+      resolution: "CCI-CP-03-01 fixed 5 scanner bugs. Now 0 false positives."
+
+    - id: "B-03-03"
+      description: "Repo structure confusing — 1,870 files, dead code, orphan symlinks"
+      resolution: "Full restructure. 45 files. Production/test/docs cleanly separated."
+
+# =============================================================================
+# NEXT STEPS
+# =============================================================================
+next_steps:
+
+  p0_immediate:
+    - task: "C-C implements Sprint 2 Create Mode from D1-D7 spec"
+      project: "CP"
+      note: |
+        6 files: class-consensuspress-create.php, class-consensuspress-post-builder.php,
+        admin/views/create.php, admin/js/consensuspress-create.js, plus modifications
+        to consensuspress.php and consensuspress-admin.css. 14 new WP stubs in
+        bootstrap.php. 20 tests (9 + 11). Scanner gates must exit 0.
+
+    - task: "D-C reviews C-C delivery against D7 verification checklist"
+      project: "CP"
+      note: "ACCEPT or REJECT. Only accepted code ships."
+
+  p1_this_week:
+    - task: "Sprint 3 D1-D7 — Async + Meta Box"
+      project: "CP"
+      note: "WP-Cron async, AJAX polling, consensus meta box on post edit screen."
+
+    - task: "Verify Rank Math meta key names (B-01-03)"
+      project: "CP"
+      note: "Web search rank_math_focus_keyword, rank_math_description, etc. against current RM source."
+
+    - task: "Generate Sprint 2 inventories after delivery"
+      project: "CP"
+      note: "Run inventory_php.php on new files → docs/inventories/sprint2/"
+
+  p2_backlog:
+    - task: "Build POST /api/v1/consensus endpoint on Railway (B-01-01)"
+      project: "SEEK"
+      note: "Thin wrapper around consensus_engine.py. JSON req/resp."
+
+    - task: "Set up local WordPress test environment"
+      project: "CP"
+      note: "wp-env, Local, or Docker. WP 6.7 + PHP 7.4. Required for smoke testing."
+
+    - task: "Sprint 4 D1-D7 — Rescue + Diff"
+      project: "CP"
+
+    - task: "Sprint 5 D1-D7 — Usage Tracking + Tiers"
+      project: "CP"
+
+    - task: "Sprint 6 — WordPress.org Packaging"
+      project: "CP"
+
+# =============================================================================
+# KEY INSIGHTS
+# =============================================================================
+key_insights:
+
+  - insight: "Scanners must speak the project's dialect"
+    lesson: |
+      HAL-001 scanner only recognised PSR-style array shapes. WordPress uses
+      hash notation (@param array $var { @type ... }). Building a WordPress
+      plugin with a Python-convention scanner causes false failures. Path B
+      (fix scanner) was correct over Path A (change PHPDoc style) — invest
+      in tooling that matches your domain.
+
+  - insight: "Repo structure IS architecture"
+    lesson: |
+      1,870 files of confusion meant nobody — human or AI — could navigate
+      the project. Cutting to 45 files with clear separation (plugin/, tests/,
+      docs/, plans/) eliminated an entire class of errors: wrong file edited,
+      dead code shipped, test files in production. The cleanup took 30 minutes.
+      The confusion cost hours across sessions.
+
+  - insight: "Phase 0 tooling pays for itself immediately"
+    lesson: |
+      Building scanners BEFORE Sprint 2 means every line of Sprint 2 code
+      is machine-verified at delivery. Without Phase 0, HAL-001 violations
+      accumulate silently and become a remediation sprint later. The scanner
+      suite cost one session. It saves every future session.
+
+  - insight: "D1 specs that include sanitise/escape per field eliminate WP compliance issues"
+    lesson: |
+      Sprint 2 D1 names the exact WordPress sanitisation function for every
+      input field and escape function for every output. C-C copies these
+      verbatim. No judgement calls, no omissions, no WP reviewer rejections.
+
+# =============================================================================
+# SESSION METRICS
+# =============================================================================
+session_metrics:
+  duration: "~6 hours (Sessions 02 + 03)"
+  bugs_fixed: 8  # 3 HAL-001 violations + 5 scanner bugs
+  features_delivered: 3  # Sprint 1, Phase 0 tooling, Phase 0.5 baseline
+  decisions_made: 10
+  files_created: 25  # 13 Sprint 1 + 6 tooling + 4 inventories + 1 baseline + 1 D1-D7
+  files_modified: 4  # CCI-CP-03-01 (2 plugin + 2 scanner)
+  docs_updated: 2  # Phase 0.5 baseline, Sprint 2 D1-D7
+  blockers_cleared: 3  # B-03-01, B-03-02, B-03-03
+  blockers_remaining: 2  # B-01-01 (server endpoint), B-01-03 (Rank Math keys)
+
+# =============================================================================
+# HYDRATION INSTRUCTIONS
+# =============================================================================
+hydration:
+
+  on_next_session:
+    - "Parse this file (02_consensuspress_02.yaml) + 01_consensuspress_01.yaml"
+    - "Parse AFD docs: afd_overview.yaml, afd_workflow.yaml, afd_success_criteria.yaml"
+    - "Parse HLR: hlr_consensus_plus.yaml"
+    - "Parse Sprint 2 spec: docs/sprint_2_d1_d7_instructions.yaml"
+    - "Confirm scanner tools accessible at docs/tooling/php-afd/"
+    - "Confirm plugin source at plugin/consensuspress/"
+    - "Confirm tests at tests/"
+
+  key_files:
+    - "bootstrap/02_consensuspress_02.yaml"
+    - "bootstrap/01_consensuspress_01.yaml"
+    - "docs/sprint_2_d1_d7_instructions.yaml"
+    - "docs/Phase_05_baseline_report.yaml"
+    - "docs/consensuspress_mock_api.yaml"
+    - "docs/inventories/sprint1/"
+
+  open_questions:
+    - "B-01-03: Are Rank Math meta key names still current? D-C to web search."
+    - "When will B-01-01 (Railway endpoint) be addressed? Blocks live testing."
+
+# =============================================================================
+# VERSION HISTORY
+# =============================================================================
+version_history:
+  - version: "1.0.0"
+    date: "2026-02-28"
+    author: "D-C"
+    changes: "Initial re-anchor covering Sessions 02-03"
+
+# =============================================================================
+# END OF RE-ANCHOR
+# =============================================================================
