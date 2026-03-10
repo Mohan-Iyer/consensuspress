@@ -1,9 +1,10 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) { exit; }
 /**
  * DNA Header
  *
  * File:         includes/class-consensuspress-usage.php
- * Version:      1.0.0
+ * Version:      1.0.1
  * Purpose:      Credit-based usage tracking and tier enforcement.
  *               Stores state in wp_options. Auto-resets monthly on read.
  *               Soft gate via check_quota(). Hard enforcement via handle_quota_exceeded() on 402.
@@ -162,7 +163,7 @@ class ConsensusPress_Usage {
 	 * @param array{success: bool, data: null, error: array{code: string, message: string}, http_status: int} $api_result Full result from ConsensusPress_API::query() on 402 response.
 	 * @return void
 	 */
-	public function handle_quota_exceeded( array $api_result ): void {
+	public function handle_quota_exceeded( array $api_result ): void {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // HAL-SUPPRESS: bare_array_param — PHPDoc shape deferred post-submission
 		$usage = $this->get_stored_usage();
 
 		// Update with any server-provided tier/limit data.

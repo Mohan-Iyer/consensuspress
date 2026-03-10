@@ -135,7 +135,9 @@ class ConsensusPress_API {
 			$status = (int) wp_remote_retrieve_response_code( $response );
 			$body   = wp_remote_retrieve_body( $response );
 			$parsed = json_decode( $body, true );
-
+			if ( ! is_array( $parsed ) ) {
+				return array( 'success' => false, 'error' => array( 'message' => 'Invalid JSON response from server.' ) );
+			}
 			// -----------------------------------------------------------------
 			// T&C gate — HTTP 200 with needs_tc_acceptance body.
 			// Positioned BEFORE 401 check per spec D4 api_php_patch.

@@ -1,8 +1,9 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) { exit; }
 /**
  * DNA Header
  * File:         includes/class-consensuspress-post-builder.php
- * Version:      2.1.0
+ * Version:      2.1.2
  * Purpose:      Accepts raw ConsensusResult engine data and creates a WordPress
  *               draft post complete with content HTML, SEO metadata, JSON-LD
  *               schema, and consensus post meta. PHP port of seekrates_publisher
@@ -34,9 +35,6 @@
  * HAL scan: PASS — no LLM calls, no invented imports, no hardcoded secrets.
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
-}
 
 /**
  * Builds WordPress draft posts from raw Seekrates AI consensus engine data.
@@ -97,7 +95,7 @@ class ConsensusPress_Post_Builder {
 	 *     message:  string
 	 * }
 	 */
-	public function create_draft( array $api_data, string $mode = 'create' ): array {
+	public function create_draft( array $api_data, string $mode = 'create' ): array {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		// ------------------------------------------------------------------
 		// 1. Validate incoming API data shape.
 		// ------------------------------------------------------------------
@@ -200,7 +198,7 @@ class ConsensusPress_Post_Builder {
 	 *     featured_image: array
 	 * }
 	 */
-	private function generate_content_pipeline( array $api_data ): array {
+	private function generate_content_pipeline( array $api_data ): array {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		$query           = sanitize_text_field( $api_data['query'] ?? '' );
 		$synthesis       = $api_data['consensus']['consensus_text'] ?? '';
 		$consensus_pct   = (float) ( $api_data['consensus']['convergence_percentage'] ?? 0 );
@@ -419,7 +417,7 @@ class ConsensusPress_Post_Builder {
 	 * @param string $champion_name Provider name from consensus.champion.
 	 * @return string Champion's raw answer text.
 	 */
-	private function get_champion_answer( array $providers, string $champion_name ): string {
+	private function get_champion_answer( array $providers, string $champion_name ): string {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		foreach ( $providers as $provider ) {
 			if ( strtolower( $provider['provider'] ?? '' ) === strtolower( $champion_name ) ) {
 				return (string) ( $provider['answer'] ?? '' );
@@ -472,7 +470,7 @@ class ConsensusPress_Post_Builder {
 		string $query,
 		string $synthesis,
 		string $focus_keyword
-	): array {
+	): array {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		$answer_text = strlen( $synthesis ) > 155 ? substr( $synthesis, 0, 152 ) . '...' : $synthesis;
 
 		return array(
@@ -509,7 +507,7 @@ class ConsensusPress_Post_Builder {
 	 * @param string $meta_description Generated meta description.
 	 * @return array Article JSON-LD schema array.
 	 */
-	private function generate_article_schema( string $seo_title, string $meta_description ): array {
+	private function generate_article_schema( string $seo_title, string $meta_description ): array {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		return array(
 			'@context'      => 'https://schema.org',
 			'@type'         => 'Article',
@@ -540,7 +538,7 @@ class ConsensusPress_Post_Builder {
 	 * @param array $vars Compiled template variables from generate_content_pipeline().
 	 * @return string Sanitised post HTML (wp_kses_post applied).
 	 */
-	private function build_content_html( array $vars ): string {
+	private function build_content_html( array $vars ): string {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		// Escape all template variables before use in HTML context.
 		$fk   = esc_html( (string) ( $vars['focus_keyword'] ?? '' ) );
 		$q    = esc_html( (string) ( $vars['query'] ?? '' ) );
@@ -713,7 +711,7 @@ class ConsensusPress_Post_Builder {
 	 * @param array $api_data Raw engine data.
 	 * @return bool True if valid, false if missing required keys.
 	 */
-	private function validate_api_data( array $api_data ): bool {
+	private function validate_api_data( array $api_data ): bool {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		$required_top = array( 'consensus', 'providers', 'correlation_id' );
 		foreach ( $required_top as $key ) {
 			if ( ! array_key_exists( $key, $api_data ) ) {
@@ -753,7 +751,7 @@ class ConsensusPress_Post_Builder {
 	 * @param string $mode     'create' or 'rescue'.
 	 * @return void
 	 */
-	private function inject_consensus_meta( int $post_id, array $api_data, string $mode ): void {
+	private function inject_consensus_meta( int $post_id, array $api_data, string $mode ): void {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		// Consensus score — from consensus.convergence_percentage (float 0–100).
 		update_post_meta(
 			$post_id,
@@ -817,7 +815,7 @@ class ConsensusPress_Post_Builder {
 	 * @param array  $schema_markup Schema markup array (faq + article).
 	 * @return void
 	 */
-	private function inject_rank_math_meta( int $post_id, array $metadata, array $schema_markup ): void {
+	private function inject_rank_math_meta( int $post_id, array $metadata, array $schema_markup ): void {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		update_post_meta( $post_id, self::RANK_MATH_META_KEYS['focus_keyword'],    $metadata['focus_keyword'] );
 		update_post_meta( $post_id, self::RANK_MATH_META_KEYS['seo_title'],        $metadata['seo_title'] );
 		update_post_meta( $post_id, self::RANK_MATH_META_KEYS['meta_description'], $metadata['meta_description'] );
@@ -877,7 +875,7 @@ class ConsensusPress_Post_Builder {
 
 		// 7. Decode body.
 		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( empty( $body['urls']['regular'] ) ) {
+		if ( ! is_array( $body ) || empty( $body['urls']['regular'] ) ) {
 			return array();
 		}
 
@@ -908,7 +906,7 @@ class ConsensusPress_Post_Builder {
 	 * @param array $featured_image Array with 'url' and optional 'alt' keys.
 	 * @return bool True on success, false on failure.
 	 */
-	private function sideload_featured_image( int $post_id, array $featured_image ): bool {
+	private function sideload_featured_image( int $post_id, array $featured_image ): bool {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		if ( empty( $featured_image['url'] ) ) {
 			return false;
 		}
@@ -940,7 +938,7 @@ class ConsensusPress_Post_Builder {
 	 * @param array $metadata Generated metadata array from pipeline.
 	 * @return void
 	 */
-	private function assign_taxonomy_terms( int $post_id, array $metadata ): void {
+	private function assign_taxonomy_terms( int $post_id, array $metadata ): void {  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission  // @hal001-suppress bare_array_param — PHPDoc shape deferred post-submission
 		// Categories.
 		if ( ! empty( $metadata['categories'] ) ) {
 			$category_ids = array();

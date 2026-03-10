@@ -29,4 +29,4 @@ tests/tmp/
 .env.local
 
 # Build artifacts
-*.zipfiles/
+*.zip
